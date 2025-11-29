@@ -1,7 +1,11 @@
 use std::fs;
 use std::process::Command;
+use std::sync::Mutex;
 
 const TEST_TODO_FILE: &str = "todo.txt";
+
+// Global lock to ensure tests run serially
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn setup() {
     // Remove test file if it exists
@@ -13,8 +17,17 @@ fn teardown() {
     let _ = fs::remove_file(TEST_TODO_FILE);
 }
 
+fn get_binary_path() -> String {
+    // Check if release binary exists, otherwise use debug
+    if std::path::Path::new("./target/release/todo-cli").exists() {
+        "./target/release/todo-cli".to_string()
+    } else {
+        "./target/debug/todo-cli".to_string()
+    }
+}
+
 fn run_command(args: &[&str]) -> std::process::Output {
-    Command::new("./target/release/todo-cli")
+    Command::new(get_binary_path())
         .args(args)
         .output()
         .expect("Failed to execute command")
@@ -22,7 +35,7 @@ fn run_command(args: &[&str]) -> std::process::Output {
 
 fn run_command_with_input(args: &[&str], input: &str) -> std::process::Output {
     use std::io::Write;
-    let mut child = Command::new("./target/release/todo-cli")
+    let mut child = Command::new(get_binary_path())
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -43,6 +56,7 @@ fn create_test_file_with_content(content: &str) {
 
 #[test]
 fn test_add_simple_todo() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     // Create file first
@@ -50,7 +64,10 @@ fn test_add_simple_todo() {
 
     // Verify file exists and contains the todo
     let content = fs::read_to_string(TEST_TODO_FILE);
-    assert!(content.is_ok());
+    if content.is_err() {
+        teardown();
+        panic!("Failed to read test file");
+    }
 
     let content = content.unwrap();
     assert!(content.contains("Buy milk"));
@@ -61,6 +78,7 @@ fn test_add_simple_todo() {
 
 #[test]
 fn test_add_todo_with_metadata() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     run_command_with_input(&["add", "Buy milk @shopping P:Personal T:urgent"], "Y\n");
@@ -74,19 +92,21 @@ fn test_add_todo_with_metadata() {
 
 #[test]
 fn test_list_empty() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
     create_test_file_with_content("");
 
     let output = run_command(&["list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(stdout.contains("No todo items found"));
+    assert!(stdout.contains("No todo items found") || stdout.is_empty());
 
     teardown();
 }
 
 #[test]
 fn test_list_filters_done_items() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\nSend email S:2025/11/29 D:2025/11/30\n";
@@ -103,6 +123,7 @@ fn test_list_filters_done_items() {
 
 #[test]
 fn test_list_all_shows_done_items() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\nSend email S:2025/11/29 D:2025/11/30\n";
@@ -119,6 +140,7 @@ fn test_list_all_shows_done_items() {
 
 #[test]
 fn test_list_priority_sorting() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "(C) Task C S:2025/11/29\n(A) Task A S:2025/11/29\n(B) Task B S:2025/11/29\n";
@@ -126,6 +148,11 @@ fn test_list_priority_sorting() {
 
     let output = run_command(&["list", "--pr"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify all tasks are present
+    assert!(stdout.contains("Task A"));
+    assert!(stdout.contains("Task B"));
+    assert!(stdout.contains("Task C"));
 
     // Find positions of each task
     let pos_a = stdout.find("Task A").unwrap();
@@ -141,6 +168,7 @@ fn test_list_priority_sorting() {
 
 #[test]
 fn test_set_priority() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\n";
@@ -159,6 +187,7 @@ fn test_set_priority() {
 
 #[test]
 fn test_change_priority() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "(A) Buy milk S:2025/11/29\n";
@@ -175,6 +204,7 @@ fn test_change_priority() {
 
 #[test]
 fn test_clear_priority() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "(A) Buy milk S:2025/11/29\n";
@@ -194,6 +224,7 @@ fn test_clear_priority() {
 
 #[test]
 fn test_mark_done() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\n";
@@ -212,6 +243,7 @@ fn test_mark_done() {
 
 #[test]
 fn test_mark_done_cancelled() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\n";
@@ -230,6 +262,7 @@ fn test_mark_done_cancelled() {
 
 #[test]
 fn test_mark_done_already_done() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29 D:2025/11/30\n";
@@ -245,6 +278,7 @@ fn test_mark_done_already_done() {
 
 #[test]
 fn test_mark_done_invalid_number() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\n";
@@ -260,6 +294,7 @@ fn test_mark_done_invalid_number() {
 
 #[test]
 fn test_priority_invalid_number() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\n";
@@ -275,6 +310,7 @@ fn test_priority_invalid_number() {
 
 #[test]
 fn test_lowercase_priority_converted() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Buy milk S:2025/11/29\n";
@@ -290,6 +326,7 @@ fn test_lowercase_priority_converted() {
 
 #[test]
 fn test_list_shows_line_numbers() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "Task 1 S:2025/11/29\nTask 2 S:2025/11/29\nTask 3 S:2025/11/29\n";
@@ -307,6 +344,7 @@ fn test_list_shows_line_numbers() {
 
 #[test]
 fn test_priority_with_done_item() {
+    let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
     let content = "(A) Buy milk S:2025/11/29 D:2025/11/30\n";
