@@ -628,3 +628,243 @@ fn test_projects_includes_done_items() {
 
     teardown();
 }
+
+// Convert command tests
+
+const TEST_TXT_FILE: &str = "test_todo.txt";
+const TEST_OUTPUT_FILE: &str = "test_output.json";
+
+fn setup_convert() {
+    let _ = fs::remove_file(TEST_TXT_FILE);
+    let _ = fs::remove_file(TEST_OUTPUT_FILE);
+}
+
+fn teardown_convert() {
+    let _ = fs::remove_file(TEST_TXT_FILE);
+    let _ = fs::remove_file(TEST_OUTPUT_FILE);
+}
+
+fn create_test_txt_file(content: &str) {
+    fs::write(TEST_TXT_FILE, content).expect("Failed to write test txt file");
+}
+
+#[test]
+fn test_convert_simple() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("Buy milk S:2025/11/29\n");
+
+    let output = run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Converted 1 todo items"));
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("Buy milk"));
+    assert!(json_content.contains("2025/11/29"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_with_priority() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("(A) Important task S:2025/11/29\n");
+
+    run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("\"priority\": \"A\""));
+    assert!(json_content.contains("Important task"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_with_metadata() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("Buy milk @shopping P:Personal T:urgent S:2025/11/29\n");
+
+    run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("Buy milk"));
+    assert!(json_content.contains("\"context\": \"shopping\""));
+    assert!(json_content.contains("\"project\": \"Personal\""));
+    assert!(json_content.contains("urgent"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_with_done_date() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("Completed task S:2025/11/28 D:2025/11/29\n");
+
+    run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("Completed task"));
+    assert!(json_content.contains("\"start_date\": \"2025/11/28\""));
+    assert!(json_content.contains("\"done_date\": \"2025/11/29\""));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_multiple_items() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    let content = "Buy milk @shopping S:2025/11/29\n\
+                   (A) Send email @work P:ProjectX T:urgent S:2025/11/28\n\
+                   (B) Call dentist S:2025/11/27 D:2025/11/30\n";
+    create_test_txt_file(content);
+
+    let output = run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Converted 3 todo items"));
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("Buy milk"));
+    assert!(json_content.contains("Send email"));
+    assert!(json_content.contains("Call dentist"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_missing_input_file() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    let output = run_command(&["convert", "nonexistent.txt", "-o", TEST_OUTPUT_FILE]);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("does not exist"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_overwrite_cancelled() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("Buy milk S:2025/11/29\n");
+    fs::write(TEST_OUTPUT_FILE, "existing content").unwrap();
+
+    let output = run_command_with_input(
+        &["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE],
+        "N\n",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Cancelled"));
+
+    // Verify original content preserved
+    let content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert_eq!(content, "existing content");
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_overwrite_confirmed() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("Buy milk S:2025/11/29\n");
+    fs::write(TEST_OUTPUT_FILE, "existing content").unwrap();
+
+    let output = run_command_with_input(
+        &["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE],
+        "Y\n",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Converted 1 todo items"));
+
+    // Verify content was overwritten
+    let content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(content.contains("Buy milk"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_empty_lines_skipped() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    let content = "Buy milk S:2025/11/29\n\n\nSend email S:2025/11/28\n\n";
+    create_test_txt_file(content);
+
+    let output = run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Converted 2 todo items"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_multiple_tags() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("Review code T:urgent T:backend T:review S:2025/11/29\n");
+
+    run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("urgent"));
+    assert!(json_content.contains("backend"));
+    assert!(json_content.contains("review"));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_lowercase_markers() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("(b) Task @home p:personal t:quick s:2025/11/29 d:2025/11/30\n");
+
+    run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("\"priority\": \"B\""));
+    assert!(json_content.contains("\"context\": \"home\""));
+    assert!(json_content.contains("\"project\": \"personal\""));
+    assert!(json_content.contains("quick"));
+    assert!(json_content.contains("\"start_date\": \"2025/11/29\""));
+    assert!(json_content.contains("\"done_date\": \"2025/11/30\""));
+
+    teardown_convert();
+}
+
+#[test]
+fn test_convert_complex_description() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup_convert();
+
+    create_test_txt_file("(A) Send email about the meeting tomorrow @work P:ProjectX T:urgent T:important S:2025/11/29\n");
+
+    run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
+
+    let json_content = fs::read_to_string(TEST_OUTPUT_FILE).unwrap();
+    assert!(json_content.contains("Send email about the meeting tomorrow"));
+
+    teardown_convert();
+}

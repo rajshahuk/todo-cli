@@ -38,6 +38,14 @@ enum Commands {
     },
     /// List all unique projects
     Projects,
+    /// Convert a todo.txt file to todo.json format
+    Convert {
+        /// Path to the input todo.txt file
+        input: String,
+        /// Path to the output JSON file (defaults to todo.json)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,6 +329,114 @@ fn set_priority(priority_str: &str, line_number: usize) -> io::Result<()> {
     Ok(())
 }
 
+fn parse_txt_line(line: &str) -> TodoItem {
+    let mut priority = None;
+    let mut context = None;
+    let mut project = None;
+    let mut tags = Vec::new();
+    let mut start_date = String::new();
+    let mut done_date = None;
+    let mut description_words = Vec::new();
+
+    let trimmed = line.trim();
+    let mut remaining = trimmed;
+
+    // Check for priority at the start: (A) format
+    if remaining.starts_with('(')
+        && remaining.len() > 3
+        && remaining.chars().nth(2) == Some(')')
+    {
+        let pri_char = remaining.chars().nth(1).unwrap();
+        if pri_char.is_ascii_alphabetic() {
+            priority = Some(pri_char.to_ascii_uppercase());
+            remaining = remaining[4..].trim_start();
+        }
+    }
+
+    // Parse the rest of the line word by word
+    for word in remaining.split_whitespace() {
+        if word.starts_with("@") && word.len() > 1 {
+            if context.is_none() {
+                context = Some(word[1..].to_string());
+            }
+        } else if (word.starts_with("P:") || word.starts_with("p:")) && word.len() > 2 {
+            if project.is_none() {
+                project = Some(word[2..].to_string());
+            }
+        } else if (word.starts_with("T:") || word.starts_with("t:")) && word.len() > 2 {
+            tags.push(word[2..].to_string());
+        } else if (word.starts_with("S:") || word.starts_with("s:")) && word.len() > 2 {
+            start_date = word[2..].to_string();
+        } else if (word.starts_with("D:") || word.starts_with("d:")) && word.len() > 2 {
+            done_date = Some(word[2..].to_string());
+        } else {
+            description_words.push(word);
+        }
+    }
+
+    TodoItem {
+        line_number: 0,
+        priority,
+        description: description_words.join(" "),
+        context,
+        project,
+        tags,
+        start_date,
+        done_date,
+    }
+}
+
+fn convert_file(input: &str, output: Option<String>) -> io::Result<()> {
+    let output_path = output.unwrap_or_else(|| TODO_FILE.to_string());
+
+    // Check if input file exists
+    if !Path::new(input).exists() {
+        eprintln!("Error: Input file '{}' does not exist", input);
+        std::process::exit(1);
+    }
+
+    // Check if output file exists and prompt for overwrite
+    if Path::new(&output_path).exists() {
+        print!(
+            "Output file '{}' already exists. Overwrite? (Y/N): ",
+            output_path
+        );
+        io::stdout().flush()?;
+
+        let mut response = String::new();
+        io::stdin().read_line(&mut response)?;
+
+        if response.trim().to_uppercase() != "Y" {
+            println!("Cancelled");
+            return Ok(());
+        }
+    }
+
+    // Read and parse the txt file
+    let content = fs::read_to_string(input)?;
+    let mut todos: Vec<TodoItem> = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            todos.push(parse_txt_line(trimmed));
+        }
+    }
+
+    // Write to JSON
+    let json = serde_json::to_string_pretty(&todos)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    fs::write(&output_path, json)?;
+
+    println!(
+        "Converted {} todo items from '{}' to '{}'",
+        todos.len(),
+        input,
+        output_path
+    );
+    Ok(())
+}
+
 fn list_projects() -> io::Result<()> {
     check_and_create_file()?;
 
@@ -358,6 +474,7 @@ fn main() {
         Commands::Done { line_number } => mark_done(line_number),
         Commands::Pr { priority, line_number } => set_priority(&priority, line_number),
         Commands::Projects => list_projects(),
+        Commands::Convert { input, output } => convert_file(&input, output),
     };
 
     if let Err(e) = result {
@@ -552,5 +669,148 @@ mod tests {
         assert_eq!(todo.tags.len(), 1);
         assert_eq!(todo.start_date, "2025/11/29");
         assert_eq!(todo.done_date, None);
+    }
+
+    // Tests for parse_txt_line (convert command)
+
+    #[test]
+    fn test_parse_txt_line_simple() {
+        let line = "Buy milk S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.priority, None);
+        assert_eq!(todo.context, None);
+        assert_eq!(todo.project, None);
+        assert!(todo.tags.is_empty());
+        assert_eq!(todo.start_date, "2025/11/29");
+        assert_eq!(todo.done_date, None);
+    }
+
+    #[test]
+    fn test_parse_txt_line_with_priority() {
+        let line = "(A) Buy milk S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.priority, Some('A'));
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.start_date, "2025/11/29");
+    }
+
+    #[test]
+    fn test_parse_txt_line_lowercase_priority() {
+        let line = "(b) Call dentist S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.priority, Some('B'));
+        assert_eq!(todo.description, "Call dentist");
+    }
+
+    #[test]
+    fn test_parse_txt_line_with_context() {
+        let line = "Buy milk @shopping S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.context, Some("shopping".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_with_project() {
+        let line = "Buy milk P:Personal S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.project, Some("Personal".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_with_tags() {
+        let line = "Review code T:urgent T:backend S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Review code");
+        assert_eq!(todo.tags.len(), 2);
+        assert_eq!(todo.tags[0], "urgent");
+        assert_eq!(todo.tags[1], "backend");
+    }
+
+    #[test]
+    fn test_parse_txt_line_with_done_date() {
+        let line = "Buy milk S:2025/11/29 D:2025/11/30";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.start_date, "2025/11/29");
+        assert_eq!(todo.done_date, Some("2025/11/30".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_complex() {
+        let line = "(B) Send email about meeting @work P:ProjectX T:urgent T:important S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.priority, Some('B'));
+        assert_eq!(todo.description, "Send email about meeting");
+        assert_eq!(todo.context, Some("work".to_string()));
+        assert_eq!(todo.project, Some("ProjectX".to_string()));
+        assert_eq!(todo.tags.len(), 2);
+        assert_eq!(todo.tags[0], "urgent");
+        assert_eq!(todo.tags[1], "important");
+        assert_eq!(todo.start_date, "2025/11/29");
+        assert_eq!(todo.done_date, None);
+    }
+
+    #[test]
+    fn test_parse_txt_line_first_context_only() {
+        let line = "Task @first @second S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Task");
+        assert_eq!(todo.context, Some("first".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_first_project_only() {
+        let line = "Task P:First P:Second S:2025/11/29";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Task");
+        assert_eq!(todo.project, Some("First".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_lowercase_markers() {
+        let line = "Task @home p:personal t:urgent s:2025/11/29 d:2025/11/30";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.description, "Task");
+        assert_eq!(todo.context, Some("home".to_string()));
+        assert_eq!(todo.project, Some("personal".to_string()));
+        assert_eq!(todo.tags, vec!["urgent"]);
+        assert_eq!(todo.start_date, "2025/11/29");
+        assert_eq!(todo.done_date, Some("2025/11/30".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_done_with_priority() {
+        let line = "(A) Completed task @work S:2025/11/28 D:2025/11/30";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.priority, Some('A'));
+        assert_eq!(todo.description, "Completed task");
+        assert_eq!(todo.context, Some("work".to_string()));
+        assert_eq!(todo.start_date, "2025/11/28");
+        assert_eq!(todo.done_date, Some("2025/11/30".to_string()));
+    }
+
+    #[test]
+    fn test_parse_txt_line_whitespace_handling() {
+        let line = "  (A) Buy milk @shopping S:2025/11/29  ";
+        let todo = parse_txt_line(line);
+
+        assert_eq!(todo.priority, Some('A'));
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.context, Some("shopping".to_string()));
     }
 }
