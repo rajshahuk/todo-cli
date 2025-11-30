@@ -1,11 +1,12 @@
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use colored::*;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::Path;
 
-const TODO_FILE: &str = "todo.txt";
+const TODO_FILE: &str = "todo.json";
 
 #[derive(Parser)]
 #[command(name = "todo-cli")]
@@ -35,48 +36,53 @@ enum Commands {
         priority: String,
         line_number: usize,
     },
+    /// List all unique projects
+    Projects,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TodoItem {
+    #[serde(skip)]
     line_number: usize,
     priority: Option<char>,
     description: String,
+    context: Option<String>,
+    project: Option<String>,
+    tags: Vec<String>,
+    start_date: String,
     done_date: Option<String>,
 }
 
-impl TodoItem {
-    fn parse(line: &str, line_number: usize) -> Self {
-        let mut priority = None;
-        let mut done_date = None;
-        let mut description = line.to_string();
+// Parse user input to extract metadata
+fn parse_metadata(input: &str) -> (String, Option<String>, Option<String>, Vec<String>) {
+    let mut description_words = Vec::new();
+    let mut context = None;
+    let mut project = None;
+    let mut tags = Vec::new();
 
-        // Check for priority at the start
-        if line.starts_with('(') && line.len() > 3 && line.chars().nth(2) == Some(')') {
-            let pri_char = line.chars().nth(1).unwrap();
-            if pri_char.is_ascii_alphabetic() {
-                priority = Some(pri_char.to_ascii_uppercase());
-                description = line[4..].to_string();
+    for word in input.split_whitespace() {
+        if word.starts_with("@") {
+            if context.is_none() {
+                context = Some(word[1..].to_string());
             }
-        }
-
-        // Check for done date
-        let words: Vec<&str> = line.split_whitespace().collect();
-        for word in words {
-            if word.starts_with("D:") {
-                done_date = Some(word[2..].to_string());
-                break;
+            // Skip all @ words, not just the first
+        } else if word.starts_with("P:") || word.starts_with("p:") {
+            if project.is_none() {
+                project = Some(word[2..].to_string());
             }
-        }
-
-        TodoItem {
-            line_number,
-            priority,
-            description,
-            done_date,
+            // Skip all P: words, not just the first
+        } else if word.starts_with("T:") || word.starts_with("t:") {
+            tags.push(word[2..].to_string());
+        } else {
+            description_words.push(word);
         }
     }
 
+    let description = description_words.join(" ");
+    (description, context, project, tags)
+}
+
+impl TodoItem {
     fn is_done(&self) -> bool {
         self.done_date.is_some()
     }
@@ -90,40 +96,32 @@ impl TodoItem {
             print!("({}) ", pri.to_string().magenta());
         }
 
-        // Find and display start date first
-        let words: Vec<&str> = self.description.split_whitespace().collect();
-        let start_date = words.iter().find(|w| w.starts_with("S:"));
-        if let Some(date) = start_date {
-            print!("{} ", date);
+        // Start date
+        print!("S:{} ", self.start_date);
+
+        // Description
+        print!("{} ", self.description);
+
+        // Context
+        if let Some(ctx) = &self.context {
+            print!("@{} ", ctx.green());
         }
 
-        // Parse and display the description with colored metadata
-        for (i, word) in words.iter().enumerate() {
-            if word.starts_with("@") {
-                print!("{}", word.green());
-            } else if word.starts_with("P:") {
-                print!("{}", word.yellow());
-            } else if word.starts_with("T:") {
-                print!("{}", word.bright_blue());
-            } else if word.starts_with("S:") {
-                // Skip start date as we already displayed it
-                continue;
-            } else if word.starts_with("D:") {
-                print!("{}", word);
-            } else if word.starts_with("(") && word.len() > 2 && word.chars().nth(2) == Some(')') {
-                // Skip priority marker if it appears in description
-                if i == 0 && self.priority.is_some() {
-                    continue;
-                }
-                print!("{}", word);
-            } else {
-                print!("{}", word);
-            }
-
-            if i < words.len() - 1 {
-                print!(" ");
-            }
+        // Project
+        if let Some(proj) = &self.project {
+            print!("P:{} ", proj.yellow());
         }
+
+        // Tags
+        for tag in &self.tags {
+            print!("T:{} ", tag.bright_blue());
+        }
+
+        // Done date
+        if let Some(done) = &self.done_date {
+            print!("D:{} ", done);
+        }
+
         println!();
     }
 }
@@ -154,39 +152,47 @@ fn check_and_create_file() -> io::Result<()> {
 }
 
 fn read_todos() -> io::Result<Vec<TodoItem>> {
-    let file = File::open(TODO_FILE)?;
-    let reader = BufReader::new(file);
-    let mut todos = Vec::new();
+    let content = fs::read_to_string(TODO_FILE)?;
 
-    for (index, line) in reader.lines().enumerate() {
-        let line = line?;
-        if !line.trim().is_empty() {
-            todos.push(TodoItem::parse(&line, index + 1));
-        }
+    let mut todos: Vec<TodoItem> = serde_json::from_str(&content)
+        .unwrap_or_else(|_| Vec::new());
+
+    // Assign line numbers based on array index
+    for (i, todo) in todos.iter_mut().enumerate() {
+        todo.line_number = i + 1;
     }
 
     Ok(todos)
 }
 
-fn write_todos(todos: &[String]) -> io::Result<()> {
-    let mut file = File::create(TODO_FILE)?;
-    for todo in todos {
-        writeln!(file, "{}", todo)?;
-    }
+fn write_todos(todos: &[TodoItem]) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(todos)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    fs::write(TODO_FILE, json)?;
     Ok(())
 }
 
 fn add_todo(description: &str) -> io::Result<()> {
     check_and_create_file()?;
 
-    let today = Local::now().format("%Y/%m/%d").to_string();
-    let todo_line = format!("{} S:{}", description, today);
+    let mut todos = read_todos()?;
 
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(TODO_FILE)?;
+    // Parse metadata from description
+    let (clean_desc, context, project, tags) = parse_metadata(description);
 
-    writeln!(file, "{}", todo_line)?;
+    let new_item = TodoItem {
+        line_number: todos.len() + 1,
+        priority: None,
+        description: clean_desc,
+        context,
+        project,
+        tags,
+        start_date: Local::now().format("%Y/%m/%d").to_string(),
+        done_date: None,
+    };
+
+    todos.push(new_item);
+    write_todos(&todos)?;
     println!("Added todo item");
     Ok(())
 }
@@ -228,25 +234,37 @@ fn list_todos(show_all: bool, sort_by_priority: bool) -> io::Result<()> {
 fn mark_done(line_number: usize) -> io::Result<()> {
     check_and_create_file()?;
 
-    let content = fs::read_to_string(TODO_FILE)?;
-    let lines: Vec<&str> = content.lines().collect();
+    let mut todos = read_todos()?;
 
-    if line_number == 0 || line_number > lines.len() {
+    if line_number == 0 || line_number > todos.len() {
         eprintln!("Error: Todo item {} does not exist", line_number);
         return Ok(());
     }
 
-    let target_line = lines[line_number - 1];
-    let todo = TodoItem::parse(target_line, line_number);
+    let todo = &todos[line_number - 1];
 
     if todo.is_done() {
         eprintln!("Error: Todo item {} is already marked as done", line_number);
         return Ok(());
     }
 
-    // Display confirmation
+    // Display confirmation - show formatted todo item
     println!("Mark this item as done?");
-    print!("  {}\n", target_line);
+    print!("  ");
+    if let Some(pri) = todo.priority {
+        print!("({}) ", pri);
+    }
+    print!("{}", todo.description);
+    if let Some(ctx) = &todo.context {
+        print!(" @{}", ctx);
+    }
+    if let Some(proj) = &todo.project {
+        print!(" P:{}", proj);
+    }
+    for tag in &todo.tags {
+        print!(" T:{}", tag);
+    }
+    print!(" S:{}\n", todo.start_date);
     print!("(Y/N): ");
     io::stdout().flush()?;
 
@@ -259,19 +277,9 @@ fn mark_done(line_number: usize) -> io::Result<()> {
     }
 
     // Add done date
-    let today = Local::now().format("%Y/%m/%d").to_string();
-    let updated_line = format!("{} D:{}", target_line, today);
+    todos[line_number - 1].done_date = Some(Local::now().format("%Y/%m/%d").to_string());
 
-    let mut new_lines = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        if i == line_number - 1 {
-            new_lines.push(updated_line.clone());
-        } else {
-            new_lines.push(line.to_string());
-        }
-    }
-
-    write_todos(&new_lines)?;
+    write_todos(&todos)?;
     println!("Todo item {} marked as done", line_number);
     Ok(())
 }
@@ -279,23 +287,18 @@ fn mark_done(line_number: usize) -> io::Result<()> {
 fn set_priority(priority_str: &str, line_number: usize) -> io::Result<()> {
     check_and_create_file()?;
 
-    let content = fs::read_to_string(TODO_FILE)?;
-    let lines: Vec<&str> = content.lines().collect();
+    let mut todos = read_todos()?;
 
-    if line_number == 0 || line_number > lines.len() {
+    if line_number == 0 || line_number > todos.len() {
         eprintln!("Error: Todo item {} does not exist", line_number);
         return Ok(());
     }
 
-    let target_line = lines[line_number - 1];
-
-    let updated_line = if priority_str.to_lowercase() == "clear" {
+    if priority_str.to_lowercase() == "clear" {
         // Remove priority
-        if target_line.starts_with('(') && target_line.len() > 3 && target_line.chars().nth(2) == Some(')') {
-            target_line[4..].to_string()
-        } else {
-            target_line.to_string()
-        }
+        todos[line_number - 1].priority = None;
+        write_todos(&todos)?;
+        println!("Cleared priority for todo item {}", line_number);
     } else {
         // Validate priority
         if priority_str.len() != 1 {
@@ -309,31 +312,40 @@ fn set_priority(priority_str: &str, line_number: usize) -> io::Result<()> {
             return Ok(());
         }
 
-        // Remove existing priority if present
-        let base_line = if target_line.starts_with('(') && target_line.len() > 3 && target_line.chars().nth(2) == Some(')') {
-            target_line[4..].to_string()
-        } else {
-            target_line.to_string()
-        };
-
-        format!("({}) {}", pri_char, base_line)
-    };
-
-    let mut new_lines = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        if i == line_number - 1 {
-            new_lines.push(updated_line.clone());
-        } else {
-            new_lines.push(line.to_string());
-        }
-    }
-
-    write_todos(&new_lines)?;
-    if priority_str.to_lowercase() == "clear" {
-        println!("Cleared priority for todo item {}", line_number);
-    } else {
+        // Set priority
+        todos[line_number - 1].priority = Some(pri_char);
+        write_todos(&todos)?;
         println!("Set priority for todo item {}", line_number);
     }
+
+    Ok(())
+}
+
+fn list_projects() -> io::Result<()> {
+    check_and_create_file()?;
+
+    let todos = read_todos()?;
+
+    // Collect unique projects
+    let mut projects: Vec<String> = todos
+        .iter()
+        .filter_map(|todo| todo.project.clone())
+        .collect();
+
+    // Remove duplicates and sort
+    projects.sort();
+    projects.dedup();
+
+    if projects.is_empty() {
+        println!("No projects found");
+        return Ok(());
+    }
+
+    println!("Projects:");
+    for project in projects {
+        println!("  P:{}", project.yellow());
+    }
+
     Ok(())
 }
 
@@ -345,6 +357,7 @@ fn main() {
         Commands::List { all, pr } => list_todos(all, pr),
         Commands::Done { line_number } => mark_done(line_number),
         Commands::Pr { priority, line_number } => set_priority(&priority, line_number),
+        Commands::Projects => list_projects(),
     };
 
     if let Err(e) = result {
@@ -358,111 +371,186 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_simple_todo() {
-        let line = "Buy milk S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
+    fn test_parse_metadata_simple() {
+        let input = "Buy milk";
+        let (desc, context, project, tags) = parse_metadata(input);
 
-        assert_eq!(todo.line_number, 1);
-        assert_eq!(todo.priority, None);
-        assert_eq!(todo.description, "Buy milk S:2025/11/29");
-        assert_eq!(todo.done_date, None);
+        assert_eq!(desc, "Buy milk");
+        assert_eq!(context, None);
+        assert_eq!(project, None);
+        assert_eq!(tags.len(), 0);
     }
 
     #[test]
-    fn test_parse_todo_with_priority() {
-        let line = "(A) Buy milk S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
+    fn test_parse_metadata_with_context() {
+        let input = "Buy milk @shopping";
+        let (desc, context, project, tags) = parse_metadata(input);
 
-        assert_eq!(todo.line_number, 1);
-        assert_eq!(todo.priority, Some('A'));
-        assert_eq!(todo.description, "Buy milk S:2025/11/29");
-        assert_eq!(todo.done_date, None);
+        assert_eq!(desc, "Buy milk");
+        assert_eq!(context, Some("shopping".to_string()));
+        assert_eq!(project, None);
+        assert_eq!(tags.len(), 0);
     }
 
     #[test]
-    fn test_parse_todo_with_lowercase_priority() {
-        let line = "(b) Buy milk S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
+    fn test_parse_metadata_with_project() {
+        let input = "Buy milk P:Personal";
+        let (desc, context, project, tags) = parse_metadata(input);
 
-        assert_eq!(todo.priority, Some('B'));
+        assert_eq!(desc, "Buy milk");
+        assert_eq!(context, None);
+        assert_eq!(project, Some("Personal".to_string()));
+        assert_eq!(tags.len(), 0);
     }
 
     #[test]
-    fn test_parse_todo_with_metadata() {
-        let line = "Buy milk @shopping P:Personal T:urgent S:2025/11/29";
-        let todo = TodoItem::parse(line, 5);
+    fn test_parse_metadata_with_tags() {
+        let input = "Review code T:urgent T:backend";
+        let (desc, context, project, tags) = parse_metadata(input);
 
-        assert_eq!(todo.line_number, 5);
-        assert!(todo.description.contains("@shopping"));
-        assert!(todo.description.contains("P:Personal"));
-        assert!(todo.description.contains("T:urgent"));
+        assert_eq!(desc, "Review code");
+        assert_eq!(context, None);
+        assert_eq!(project, None);
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0], "urgent");
+        assert_eq!(tags[1], "backend");
     }
 
     #[test]
-    fn test_parse_done_todo() {
-        let line = "Buy milk S:2025/11/29 D:2025/11/30";
-        let todo = TodoItem::parse(line, 1);
+    fn test_parse_metadata_complex() {
+        let input = "Send email about meeting @work P:ProjectX T:urgent T:important";
+        let (desc, context, project, tags) = parse_metadata(input);
 
-        assert_eq!(todo.done_date, Some("2025/11/30".to_string()));
+        assert_eq!(desc, "Send email about meeting");
+        assert_eq!(context, Some("work".to_string()));
+        assert_eq!(project, Some("ProjectX".to_string()));
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0], "urgent");
+        assert_eq!(tags[1], "important");
+    }
+
+    #[test]
+    fn test_parse_metadata_first_context_only() {
+        let input = "Task @first @second";
+        let (desc, context, _project, _tags) = parse_metadata(input);
+
+        assert_eq!(desc, "Task");
+        assert_eq!(context, Some("first".to_string()));
+    }
+
+    #[test]
+    fn test_parse_metadata_first_project_only() {
+        let input = "Task P:First P:Second";
+        let (desc, _context, project, _tags) = parse_metadata(input);
+
+        assert_eq!(desc, "Task");
+        assert_eq!(project, Some("First".to_string()));
+    }
+
+    #[test]
+    fn test_parse_metadata_lowercase_project() {
+        let input = "Buy milk p:Personal";
+        let (desc, _context, project, _tags) = parse_metadata(input);
+
+        assert_eq!(desc, "Buy milk");
+        assert_eq!(project, Some("Personal".to_string()));
+    }
+
+    #[test]
+    fn test_parse_metadata_lowercase_tags() {
+        let input = "Fix bug t:urgent t:backend";
+        let (desc, _context, _project, tags) = parse_metadata(input);
+
+        assert_eq!(desc, "Fix bug");
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0], "urgent");
+        assert_eq!(tags[1], "backend");
+    }
+
+    #[test]
+    fn test_parse_metadata_mixed_case() {
+        let input = "Task p:Project1 T:tag1 t:tag2 P:Project2";
+        let (desc, _context, project, tags) = parse_metadata(input);
+
+        assert_eq!(desc, "Task");
+        assert_eq!(project, Some("Project1".to_string())); // First one wins
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0], "tag1");
+        assert_eq!(tags[1], "tag2");
+    }
+
+    #[test]
+    fn test_todo_item_is_done() {
+        let todo = TodoItem {
+            line_number: 1,
+            priority: None,
+            description: "Buy milk".to_string(),
+            context: None,
+            project: None,
+            tags: Vec::new(),
+            start_date: "2025/11/29".to_string(),
+            done_date: Some("2025/11/30".to_string()),
+        };
+
         assert!(todo.is_done());
     }
 
     #[test]
-    fn test_parse_done_todo_with_priority() {
-        let line = "(A) Buy milk S:2025/11/29 D:2025/11/30";
-        let todo = TodoItem::parse(line, 1);
-
-        assert_eq!(todo.priority, Some('A'));
-        assert_eq!(todo.done_date, Some("2025/11/30".to_string()));
-        assert!(todo.is_done());
-    }
-
-    #[test]
-    fn test_is_done_false() {
-        let line = "Buy milk S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
+    fn test_todo_item_is_not_done() {
+        let todo = TodoItem {
+            line_number: 1,
+            priority: None,
+            description: "Buy milk".to_string(),
+            context: None,
+            project: None,
+            tags: Vec::new(),
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+        };
 
         assert!(!todo.is_done());
     }
 
     #[test]
-    fn test_priority_uppercase_conversion() {
-        let line = "(z) Low priority task S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
+    fn test_todo_item_serialization() {
+        let todo = TodoItem {
+            line_number: 1,
+            priority: Some('A'),
+            description: "Buy milk".to_string(),
+            context: Some("shopping".to_string()),
+            project: Some("Personal".to_string()),
+            tags: vec!["urgent".to_string()],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+        };
 
-        assert_eq!(todo.priority, Some('Z'));
+        let json = serde_json::to_string(&todo).unwrap();
+        assert!(json.contains("Buy milk"));
+        assert!(json.contains("shopping"));
+        assert!(json.contains("Personal"));
+        assert!(json.contains("urgent"));
+        assert!(!json.contains("line_number"));
     }
 
     #[test]
-    fn test_parse_multiple_tags() {
-        let line = "Review code T:review T:backend T:urgent S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
+    fn test_todo_item_deserialization() {
+        let json = r#"{
+            "priority": "A",
+            "description": "Buy milk",
+            "context": "shopping",
+            "project": "Personal",
+            "tags": ["urgent"],
+            "start_date": "2025/11/29",
+            "done_date": null
+        }"#;
 
-        assert!(todo.description.contains("T:review"));
-        assert!(todo.description.contains("T:backend"));
-        assert!(todo.description.contains("T:urgent"));
-    }
-
-    #[test]
-    fn test_parse_without_priority_marker() {
-        let line = "Regular task without priority S:2025/11/29";
-        let todo = TodoItem::parse(line, 1);
-
-        assert_eq!(todo.priority, None);
-        assert_eq!(todo.description, "Regular task without priority S:2025/11/29");
-    }
-
-    #[test]
-    fn test_parse_complex_todo() {
-        let line = "(B) Send email about meeting @work P:ProjectX T:urgent T:important S:2025/11/29";
-        let todo = TodoItem::parse(line, 3);
-
-        assert_eq!(todo.line_number, 3);
-        assert_eq!(todo.priority, Some('B'));
-        assert!(todo.description.contains("@work"));
-        assert!(todo.description.contains("P:ProjectX"));
-        assert!(todo.description.contains("T:urgent"));
-        assert!(todo.description.contains("T:important"));
+        let todo: TodoItem = serde_json::from_str(json).unwrap();
+        assert_eq!(todo.priority, Some('A'));
+        assert_eq!(todo.description, "Buy milk");
+        assert_eq!(todo.context, Some("shopping".to_string()));
+        assert_eq!(todo.project, Some("Personal".to_string()));
+        assert_eq!(todo.tags.len(), 1);
+        assert_eq!(todo.start_date, "2025/11/29");
         assert_eq!(todo.done_date, None);
     }
 }

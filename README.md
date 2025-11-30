@@ -1,90 +1,338 @@
 # todo-cli
 
-This is a command line application written in rust. It uses the clap framework to parse command
-line arguments.
+A fast, colorful command-line todo list manager written in Rust. Keep track of your tasks with priorities, contexts, projects, and tags—all stored in a simple JSON file.
 
-Here are the basics of how this application works:
+## Features
 
-   * Todo items are managed a text file in this directory. The file is called `todo.txt` and the format of the file is very similar to that which is used in todo.gtd 
-   * Each todo is on a single line in the file
-   * When an items is added to the file we always add the start date of the todo which is the current date. The start date is denoted by S:[DATE]
-   * All dates are the format yyyy/mm/dd where yyyy = year, mm = month, dd = day
-   * An item is added to the todo list by passing the `add` command to the programme
-   * Outstanding items can be viewed by the user by passing in the `list` command to the programme. Outstanding items are ones that are not yet done. The `list` command prints the line number of the todo item in the file
-   * An item can be marked as done by passing the `done` command with the todo item number from the list command. When this is run the todo item in the file is marked with D:[DATE]
-   * A todo item can optionally have a context. This is denoted by the `@` symbol. Example contexts might be `@email` `@teams` etc.
-   * A todo item can optionally have a project associataed with it. This is denoted by `P:[PROJECT_NAME]`, Examples could be, `P:ProjectOne`, `P:ProjectTwo`
-   * A todo item can optionally have multiple tags associataed with it. This is denoted by `T:[TAG_NAME]`, Examples could be, `T:TagOne`, `T:TagTwo`
-   * When viewing the `list` of todo items, line numbers, contexts and tags should be displayed in a different colour.
-   * A todo item can be prioritised by passing in the `pr` command followed by a single character. For example, `todo-cli pr a 12` would be prioritise todo item 12 with priority A. All priority values should be put in uppercase and should always appear at the start of the line in the todo file.
-   
-## Clarification of Requirements
+- 🎨 **Color-coded output** for easy scanning
+- 📊 **Priority management** (A-Z, where A is highest)
+- 🏷️ **Organize with contexts** (`@work`, `@home`), **projects** (`P:ProjectName`), and **tags** (`T:urgent`)
+- ✅ **Track completion** with automatic date tracking
+- 🔍 **Flexible listing** - view all tasks or filter by completion status
+- 📁 **JSON storage** - human-readable, easy to backup or sync
 
-### Adding an item to the todo file
+## Quick Start
 
-The syntax for adding a todo item is as follows:
+### Build the application
 
-```
-todo-cli add "Buy milk @shopping P:Personal"
+```bash
+cargo build --release
 ```
 
-### Line format
+### Add your first todo
 
+```bash
+./target/release/todo-cli add "Buy groceries @home"
 ```
-(A) Buy milk @shopping P:Personal T:urgent S:2025/11/29 D:2025/11/30 T:Tescos
+
+On first run, you'll be prompted to create the `todo.json` file in your current directory.
+
+### View your todos
+
+```bash
+./target/release/todo-cli list
 ```
 
-   * Priority always comes at the beginning of the line
-   * start date, done date, projects, contexts and tags could appear anywhere on the line
+That's it! You're managing todos from the command line.
 
-### Done bevahiour
+## Usage Examples
 
-   * D:[DATE] can be added anywhere on the line, including the end of the line
-   * The piority marker can be kept when an item is marked as done
-   * Ask the user for confirmation when they mark an items as done. Display the original todo item in the confirmation message. A simple Y/N will suffice
-   * If the todo item does not exist or it is already marked as done  then display a suitable error
+### Adding Tasks
 
+Add a simple task:
+```bash
+todo-cli add "Call the dentist"
+```
 
-### Priority command
+Add a task with context, project, and tags:
+```bash
+todo-cli add "Review pull request @work P:Backend T:urgent T:review"
+```
 
-   * The valid range is A-Z
-   * You can change the priority of an exising item
-   * There should be a way to clear the priority of an item i.e. `todo pr clear 12`
-   * You can except either lowercase or uppercase for the priority
-   * A is higher priority than B
-   * The lowest priority is Z
-   * If the todo item does not exist then display a suitable error
+The metadata markers (`@`, `P:`, `T:`) can appear anywhere in your description:
+```bash
+todo-cli add "Email team about P:Launch campaign tomorrow"
+# Result: description="Email team about campaign tomorrow", project="Launch"
+```
 
-### List Output
+### Viewing Tasks
 
-   * By default the list output should exclude items that are done.
-   * If you run the list comamand with `list --all` then all the items should be shown
-   * The output should show the actual line number in the file
-   * If you run the commend with `list --pr` then items should be ordered by priority and the remaining items should be ordered by the file order.
-   * done items should respect priority sorting too if --all is used
+List uncompleted tasks:
+```bash
+todo-cli list
+```
 
-### Filtering
+View all tasks (including completed):
+```bash
+todo-cli list --all
+```
 
-At this point in time there is no need to be able to filter by project, tag, context etc
+Sort by priority:
+```bash
+todo-cli list --pr
+```
 
-### File Location
+Combine flags:
+```bash
+todo-cli list --all --pr
+```
 
-   * The file should be in the current working directory
-   * If the file doesn't exist prompt the user if they want to create it with a clear message on where it will be created.
+Example output:
+```
+2 (A) S:2025/11/30 Send email @work T:important
+3 (B) S:2025/11/30 Review code P:ProjectX T:review T:backend
+1 S:2025/11/30 Buy milk @shopping P:Personal T:urgent
+```
 
-### Colour Scheme
+### Setting Priorities
 
-   * Pick accessible colours in the terminal when running no a dark background.
-   * line numbers, contexts, projects and tags should all have different colours
-   * priority should have its own colour as well
+Set a priority (A is highest, Z is lowest):
+```bash
+todo-cli pr a 2    # Set priority A on item 2
+todo-cli pr B 5    # Set priority B (accepts lowercase)
+```
 
-### Multiple values
+Remove a priority:
+```bash
+todo-cli pr clear 2
+```
 
-   * There can only be one project per item - it is optional
-      * if someone writes P:Project1 P:Project2 then take the first one.
-   * There can only be one context per item - it is optional
-   * There can be multiple tags per item - they are also optional. Each tag will be prefixed with T:
+### Completing Tasks
 
-### Metadata
+Mark a task as done:
+```bash
+todo-cli done 1
+```
 
-   * if someone writes "Email about P:ProjectX", this can be treated as part of the whole todo item and the project should be parsed as well.
+You'll be asked to confirm:
+```
+Mark this item as done?
+  Buy milk @shopping P:Personal S:2025/11/30
+(Y/N):
+```
+
+### Viewing Projects
+
+List all unique projects across all todos:
+```bash
+todo-cli projects
+```
+
+Example output:
+```
+Projects:
+  P:Backend
+  P:Frontend
+  P:Website
+```
+
+This command shows all projects in alphabetical order, including those from completed items.
+
+## Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `add "description"` | Add a new todo item |
+| `list` | Show uncompleted items |
+| `list --all` | Show all items including completed |
+| `list --pr` | Show items sorted by priority |
+| `done <number>` | Mark item as done (with confirmation) |
+| `pr <priority> <number>` | Set priority A-Z on an item |
+| `pr clear <number>` | Remove priority from an item |
+| `projects` | List all unique projects |
+
+## Organizing Your Todos
+
+### Contexts (one per task)
+
+Use `@` to specify where or when a task should be done:
+- `@work` - Tasks to do at work
+- `@home` - Home tasks
+- `@computer` - Tasks requiring a computer
+- `@errands` - Things to do while out
+
+```bash
+todo-cli add "Send meeting notes @work"
+```
+
+If you specify multiple contexts, only the first is saved:
+```bash
+todo-cli add "Task @first @second"  # Only @first is saved
+```
+
+### Projects (one per task)
+
+Use `P:` or `p:` (case-insensitive) to group tasks by project:
+- `P:Website` - Website redesign tasks
+- `p:Personal` - Personal project tasks
+- `P:Learning` - Learning and study tasks
+
+```bash
+todo-cli add "Update landing page P:Website"
+todo-cli add "Call dentist p:personal"  # Lowercase works too
+```
+
+### Tags (multiple per task)
+
+Use `T:` or `t:` (case-insensitive) to add flexible labels. You can add as many as needed:
+- `T:urgent` - High priority tasks
+- `t:waiting` - Waiting on someone else
+- `T:quick` - Quick tasks (< 5 minutes)
+
+```bash
+todo-cli add "Fix login bug T:urgent T:bug t:frontend"  # Mixed case works
+```
+
+## Color Scheme
+
+When viewing your list, different elements are color-coded for quick identification:
+
+- **Line numbers**: Cyan
+- **Priorities**: Magenta
+- **Contexts** (`@`): Green
+- **Projects** (`P:`): Yellow
+- **Tags** (`T:`): Bright blue
+
+Colors are optimized for dark terminal backgrounds.
+
+## Data Format
+
+Todos are stored in `todo.json` in your current working directory. The file is a JSON array of todo objects:
+
+```json
+[
+  {
+    "priority": "A",
+    "description": "Buy milk",
+    "context": "shopping",
+    "project": "Personal",
+    "tags": ["urgent"],
+    "start_date": "2025/11/30",
+    "done_date": null
+  },
+  {
+    "priority": null,
+    "description": "Send email",
+    "context": "work",
+    "project": null,
+    "tags": ["important", "today"],
+    "start_date": "2025/11/30",
+    "done_date": "2025/12/01"
+  }
+]
+```
+
+### Field Descriptions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `priority` | string or null | Single character A-Z (A = highest priority) |
+| `description` | string | The task description (metadata markers removed) |
+| `context` | string or null | Single context from `@context` marker |
+| `project` | string or null | Single project from `P:project` marker |
+| `tags` | array | Zero or more tags from `T:tag` markers |
+| `start_date` | string | Date created (yyyy/mm/dd), auto-generated |
+| `done_date` | string or null | Date completed (yyyy/mm/dd), set when done |
+
+The JSON format makes it easy to:
+- Back up your todos (just copy the file)
+- Sync across devices (use Dropbox, Git, etc.)
+- Write scripts to analyze your tasks
+- Manually edit if needed
+
+## Development
+
+### Prerequisites
+
+- Rust 1.70+ (uses 2021 edition)
+- Cargo (comes with Rust)
+
+### Dependencies
+
+- **clap** (4.5) - Command-line argument parsing
+- **colored** (2.1) - Terminal colors
+- **chrono** (0.4) - Date handling
+- **serde** (1.0) - Serialization
+- **serde_json** (1.0) - JSON support
+
+### Building
+
+Debug build (faster compilation):
+```bash
+cargo build
+./target/debug/todo-cli
+```
+
+Release build (optimized):
+```bash
+cargo build --release
+./target/release/todo-cli
+```
+
+### Testing
+
+Run all tests:
+```bash
+cargo test
+```
+
+Run only unit tests:
+```bash
+cargo test --bin todo-cli
+```
+
+Run only integration tests:
+```bash
+cargo test --test integration_tests
+```
+
+The test suite includes:
+- **14 unit tests** - Testing metadata parsing and JSON serialization
+- **22 integration tests** - Testing all CLI commands end-to-end
+
+## Tips
+
+### Getting Started
+
+1. Create a `todo.json` file in a central location (e.g., `~/todos/`)
+2. Add an alias to your shell config:
+   ```bash
+   alias t='cd ~/todos && todo-cli'
+   ```
+3. Now you can quickly manage todos from anywhere: `t add "Task"`, `t list`
+
+### Workflow Suggestions
+
+**Morning routine:**
+```bash
+todo-cli list --pr  # Review prioritized tasks
+```
+
+**Capture tasks quickly:**
+```bash
+todo-cli add "Task" T:inbox  # Tag for later processing
+```
+
+**Weekly review:**
+```bash
+todo-cli list --all  # Review completed and pending tasks
+```
+
+**Project focus:**
+```bash
+todo-cli projects                      # View all projects
+todo-cli list --pr | grep "P:Website"  # See all website tasks
+```
+
+## License
+
+This project is open source. See the LICENSE file for details.
+
+## Contributing
+
+Contributions are welcome! Please ensure all tests pass before submitting a pull request.
+
+```bash
+cargo test
+cargo build --release
+```
