@@ -28,6 +28,8 @@ enum Commands {
         /// Sort by priority
         #[arg(long)]
         pr: bool,
+        /// Filter by age (e.g., +1d for older than 1 day, +2w for 2 weeks, +3m for 3 months, +1y for 1 year)
+        age_filter: Option<String>,
     },
     /// Mark a todo item as done
     Done { line_number: usize },
@@ -69,9 +71,9 @@ fn parse_metadata(input: &str) -> (String, Option<String>, Option<String>, Vec<S
     let mut tags = Vec::new();
 
     for word in input.split_whitespace() {
-        if word.starts_with("@") {
+        if let Some(stripped) = word.strip_prefix("@") {
             if context.is_none() {
-                context = Some(word[1..].to_string());
+                context = Some(stripped.to_string());
             }
             // Skip all @ words, not just the first
         } else if word.starts_with("P:") || word.starts_with("p:") {
@@ -162,8 +164,7 @@ fn check_and_create_file() -> io::Result<()> {
 fn read_todos() -> io::Result<Vec<TodoItem>> {
     let content = fs::read_to_string(TODO_FILE)?;
 
-    let mut todos: Vec<TodoItem> = serde_json::from_str(&content)
-        .unwrap_or_else(|_| Vec::new());
+    let mut todos: Vec<TodoItem> = serde_json::from_str(&content).unwrap_or_else(|_| Vec::new());
 
     // Assign line numbers based on array index
     for (i, todo) in todos.iter_mut().enumerate() {
@@ -174,10 +175,63 @@ fn read_todos() -> io::Result<Vec<TodoItem>> {
 }
 
 fn write_todos(todos: &[TodoItem]) -> io::Result<()> {
-    let json = serde_json::to_string_pretty(todos)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(todos).map_err(io::Error::other)?;
     fs::write(TODO_FILE, json)?;
     Ok(())
+}
+
+// Parse age filter string (e.g., "+1d", "+2w", "+3m", "+1y")
+// Returns (value, unit) where unit is 'd', 'w', 'm', or 'y'
+fn parse_age_filter(filter: &str) -> Option<(i64, char)> {
+    let trimmed = filter.trim();
+
+    // Must start with '+'
+    if !trimmed.starts_with('+') {
+        return None;
+    }
+
+    let without_plus = &trimmed[1..];
+
+    // Must have at least 2 characters (number + unit)
+    if without_plus.len() < 2 {
+        return None;
+    }
+
+    // Extract the unit (last character)
+    let unit = without_plus.chars().last()?;
+
+    // Validate unit
+    if !matches!(unit, 'd' | 'w' | 'm' | 'y') {
+        return None;
+    }
+
+    // Extract and parse the number
+    let number_str = &without_plus[..without_plus.len() - 1];
+    let value = number_str.parse::<i64>().ok()?;
+
+    // Value must be positive
+    if value <= 0 {
+        return None;
+    }
+
+    Some((value, unit))
+}
+
+// Calculate cutoff date based on age filter
+// Returns a date string in "YYYY/MM/DD" format
+fn calculate_cutoff_date(value: i64, unit: char) -> String {
+    use chrono::Duration;
+
+    let now = Local::now();
+    let cutoff = match unit {
+        'd' => now - Duration::days(value),
+        'w' => now - Duration::weeks(value),
+        'm' => now - Duration::days(value * 30), // Approximate month as 30 days
+        'y' => now - Duration::days(value * 365), // Approximate year as 365 days
+        _ => now,                                // Should never happen due to validation
+    };
+
+    cutoff.format("%Y/%m/%d").to_string()
 }
 
 fn add_todo(description: &str) -> io::Result<()> {
@@ -205,7 +259,11 @@ fn add_todo(description: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn list_todos(show_all: bool, sort_by_priority: bool) -> io::Result<()> {
+fn list_todos(
+    show_all: bool,
+    sort_by_priority: bool,
+    age_filter: Option<String>,
+) -> io::Result<()> {
     check_and_create_file()?;
 
     let mut todos = read_todos()?;
@@ -215,6 +273,27 @@ fn list_todos(show_all: bool, sort_by_priority: bool) -> io::Result<()> {
         todos.retain(|todo| !todo.is_done());
     }
 
+    // Apply age filter if provided
+    if let Some(filter) = age_filter {
+        match parse_age_filter(&filter) {
+            Some((value, unit)) => {
+                let cutoff_date = calculate_cutoff_date(value, unit);
+                todos.retain(|todo| {
+                    // Compare start_date with cutoff_date
+                    // A todo is "older than" the age if its start_date <= cutoff_date
+                    todo.start_date <= cutoff_date
+                });
+            }
+            None => {
+                eprintln!(
+                    "Error: Invalid age filter format. Use format like +1d, +2w, +3m, or +1y"
+                );
+                eprintln!("  d = days, w = weeks, m = months, y = years");
+                return Ok(());
+            }
+        }
+    }
+
     if todos.is_empty() {
         println!("No todo items found");
         return Ok(());
@@ -222,13 +301,11 @@ fn list_todos(show_all: bool, sort_by_priority: bool) -> io::Result<()> {
 
     // Sort by priority if requested
     if sort_by_priority {
-        todos.sort_by(|a, b| {
-            match (a.priority, b.priority) {
-                (Some(p1), Some(p2)) => p1.cmp(&p2),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.line_number.cmp(&b.line_number),
-            }
+        todos.sort_by(|a, b| match (a.priority, b.priority) {
+            (Some(p1), Some(p2)) => p1.cmp(&p2),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.line_number.cmp(&b.line_number),
         });
     }
 
@@ -272,7 +349,7 @@ fn mark_done(line_number: usize) -> io::Result<()> {
     for tag in &todo.tags {
         print!(" T:{}", tag);
     }
-    print!(" S:{}\n", todo.start_date);
+    println!(" S:{}", todo.start_date);
     print!("(Y/N): ");
     io::stdout().flush()?;
 
@@ -342,10 +419,7 @@ fn parse_txt_line(line: &str) -> TodoItem {
     let mut remaining = trimmed;
 
     // Check for priority at the start: (A) format
-    if remaining.starts_with('(')
-        && remaining.len() > 3
-        && remaining.chars().nth(2) == Some(')')
-    {
+    if remaining.starts_with('(') && remaining.len() > 3 && remaining.chars().nth(2) == Some(')') {
         let pri_char = remaining.chars().nth(1).unwrap();
         if pri_char.is_ascii_alphabetic() {
             priority = Some(pri_char.to_ascii_uppercase());
@@ -424,8 +498,7 @@ fn convert_file(input: &str, output: Option<String>) -> io::Result<()> {
     }
 
     // Write to JSON
-    let json = serde_json::to_string_pretty(&todos)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(&todos).map_err(io::Error::other)?;
     fs::write(&output_path, json)?;
 
     println!(
@@ -470,9 +543,16 @@ fn main() {
 
     let result = match cli.command {
         Commands::Add { description } => add_todo(&description),
-        Commands::List { all, pr } => list_todos(all, pr),
+        Commands::List {
+            all,
+            pr,
+            age_filter,
+        } => list_todos(all, pr, age_filter),
         Commands::Done { line_number } => mark_done(line_number),
-        Commands::Pr { priority, line_number } => set_priority(&priority, line_number),
+        Commands::Pr {
+            priority,
+            line_number,
+        } => set_priority(&priority, line_number),
         Commands::Projects => list_projects(),
         Commands::Convert { input, output } => convert_file(&input, output),
     };
@@ -747,7 +827,8 @@ mod tests {
 
     #[test]
     fn test_parse_txt_line_complex() {
-        let line = "(B) Send email about meeting @work P:ProjectX T:urgent T:important S:2025/11/29";
+        let line =
+            "(B) Send email about meeting @work P:ProjectX T:urgent T:important S:2025/11/29";
         let todo = parse_txt_line(line);
 
         assert_eq!(todo.priority, Some('B'));
@@ -812,5 +893,85 @@ mod tests {
         assert_eq!(todo.priority, Some('A'));
         assert_eq!(todo.description, "Buy milk");
         assert_eq!(todo.context, Some("shopping".to_string()));
+    }
+
+    // Tests for age filter functionality
+
+    #[test]
+    fn test_parse_age_filter_days() {
+        let result = parse_age_filter("+1d");
+        assert_eq!(result, Some((1, 'd')));
+
+        let result = parse_age_filter("+7d");
+        assert_eq!(result, Some((7, 'd')));
+    }
+
+    #[test]
+    fn test_parse_age_filter_weeks() {
+        let result = parse_age_filter("+2w");
+        assert_eq!(result, Some((2, 'w')));
+    }
+
+    #[test]
+    fn test_parse_age_filter_months() {
+        let result = parse_age_filter("+3m");
+        assert_eq!(result, Some((3, 'm')));
+    }
+
+    #[test]
+    fn test_parse_age_filter_years() {
+        let result = parse_age_filter("+1y");
+        assert_eq!(result, Some((1, 'y')));
+    }
+
+    #[test]
+    fn test_parse_age_filter_invalid_no_plus() {
+        let result = parse_age_filter("1d");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_age_filter_invalid_unit() {
+        let result = parse_age_filter("+1x");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_age_filter_invalid_no_number() {
+        let result = parse_age_filter("+d");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_age_filter_invalid_negative() {
+        let result = parse_age_filter("+-1d");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_age_filter_invalid_zero() {
+        let result = parse_age_filter("+0d");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_parse_age_filter_with_whitespace() {
+        let result = parse_age_filter(" +5d ");
+        assert_eq!(result, Some((5, 'd')));
+    }
+
+    #[test]
+    fn test_calculate_cutoff_date_format() {
+        let cutoff = calculate_cutoff_date(1, 'd');
+        // Check that the format matches YYYY/MM/DD
+        assert!(cutoff.len() == 10);
+        assert!(cutoff.contains('/'));
+        let parts: Vec<&str> = cutoff.split('/').collect();
+        assert_eq!(parts.len(), 3);
+        // Year should be 4 digits
+        assert_eq!(parts[0].len(), 4);
+        // Month and day should be 2 digits
+        assert_eq!(parts[1].len(), 2);
+        assert_eq!(parts[2].len(), 2);
     }
 }

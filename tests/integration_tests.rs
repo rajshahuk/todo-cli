@@ -56,10 +56,14 @@ fn run_command_with_input(args: &[&str], input: &str) -> std::process::Output {
         .expect("Failed to spawn command");
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+        stdin
+            .write_all(input.as_bytes())
+            .expect("Failed to write to stdin");
     }
 
-    child.wait_with_output().expect("Failed to wait for command")
+    child
+        .wait_with_output()
+        .expect("Failed to wait for command")
 }
 
 fn create_test_file_with_todos(todos: Vec<TodoItem>) {
@@ -763,10 +767,7 @@ fn test_convert_overwrite_cancelled() {
     create_test_txt_file("Buy milk S:2025/11/29\n");
     fs::write(TEST_OUTPUT_FILE, "existing content").unwrap();
 
-    let output = run_command_with_input(
-        &["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE],
-        "N\n",
-    );
+    let output = run_command_with_input(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE], "N\n");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Cancelled"));
@@ -786,10 +787,7 @@ fn test_convert_overwrite_confirmed() {
     create_test_txt_file("Buy milk S:2025/11/29\n");
     fs::write(TEST_OUTPUT_FILE, "existing content").unwrap();
 
-    let output = run_command_with_input(
-        &["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE],
-        "Y\n",
-    );
+    let output = run_command_with_input(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE], "Y\n");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Converted 1 todo items"));
@@ -859,7 +857,9 @@ fn test_convert_complex_description() {
     let _lock = TEST_LOCK.lock().unwrap();
     setup_convert();
 
-    create_test_txt_file("(A) Send email about the meeting tomorrow @work P:ProjectX T:urgent T:important S:2025/11/29\n");
+    create_test_txt_file(
+        "(A) Send email about the meeting tomorrow @work P:ProjectX T:urgent T:important S:2025/11/29\n",
+    );
 
     run_command(&["convert", TEST_TXT_FILE, "-o", TEST_OUTPUT_FILE]);
 
