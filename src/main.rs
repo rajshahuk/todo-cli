@@ -33,6 +33,8 @@ enum Commands {
     },
     /// Mark a todo item as done
     Done { line_number: usize },
+    /// Edit a todo item
+    Edit { line_number: usize },
     /// Set or clear priority for a todo item
     Pr {
         priority: String,
@@ -406,6 +408,122 @@ fn set_priority(priority_str: &str, line_number: usize) -> io::Result<()> {
     Ok(())
 }
 
+// Helper function to read input with a default value shown
+// If user presses Enter without typing, returns None (keep current value)
+// If user types something, returns Some(value)
+fn read_input_with_default(prompt: &str, current_value: &str) -> io::Result<Option<String>> {
+    print!("{} [{}]: ", prompt, current_value);
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+
+    if trimmed.is_empty() {
+        Ok(None) // Keep current value
+    } else {
+        Ok(Some(trimmed.to_string()))
+    }
+}
+
+fn edit_todo(line_number: usize) -> io::Result<()> {
+    check_and_create_file()?;
+
+    let mut todos = read_todos()?;
+
+    if line_number == 0 || line_number > todos.len() {
+        eprintln!("Error: Todo item {} does not exist", line_number);
+        return Ok(());
+    }
+
+    let todo = &todos[line_number - 1];
+
+    println!("Editing todo item {}:", line_number);
+    println!("Press Enter to keep current value, or type new value\n");
+
+    // Edit description
+    let current_desc = &todo.description;
+    let new_description = read_input_with_default("Description", current_desc)?;
+
+    // Edit priority
+    let current_priority = todo
+        .priority
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let new_priority = read_input_with_default("Priority (A-Z, or 'clear')", &current_priority)?;
+
+    // Edit context
+    let current_context = todo.context.as_deref().unwrap_or("none");
+    let new_context = read_input_with_default("Context (without @)", current_context)?;
+
+    // Edit project
+    let current_project = todo.project.as_deref().unwrap_or("none");
+    let new_project = read_input_with_default("Project (without P:)", current_project)?;
+
+    // Edit tags
+    let current_tags = if todo.tags.is_empty() {
+        "none".to_string()
+    } else {
+        todo.tags.join(", ")
+    };
+    let new_tags = read_input_with_default("Tags (comma-separated, without T:)", &current_tags)?;
+
+    // Apply changes
+    let todo_mut = &mut todos[line_number - 1];
+
+    if let Some(desc) = new_description {
+        todo_mut.description = desc;
+    }
+
+    if let Some(pri) = new_priority {
+        if pri.to_lowercase() == "clear" || pri.to_lowercase() == "none" {
+            todo_mut.priority = None;
+        } else if pri.len() == 1 {
+            let pri_char = pri.chars().next().unwrap().to_ascii_uppercase();
+            if pri_char.is_ascii_alphabetic() {
+                todo_mut.priority = Some(pri_char);
+            } else {
+                eprintln!("Warning: Invalid priority '{}', keeping current value", pri);
+            }
+        } else {
+            eprintln!("Warning: Invalid priority '{}', keeping current value", pri);
+        }
+    }
+
+    if let Some(ctx) = new_context {
+        if ctx.to_lowercase() == "clear" || ctx.to_lowercase() == "none" {
+            todo_mut.context = None;
+        } else {
+            todo_mut.context = Some(ctx);
+        }
+    }
+
+    if let Some(proj) = new_project {
+        if proj.to_lowercase() == "clear" || proj.to_lowercase() == "none" {
+            todo_mut.project = None;
+        } else {
+            todo_mut.project = Some(proj);
+        }
+    }
+
+    if let Some(tags_str) = new_tags {
+        if tags_str.to_lowercase() == "clear" || tags_str.to_lowercase() == "none" {
+            todo_mut.tags = Vec::new();
+        } else {
+            todo_mut.tags = tags_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+    }
+
+    write_todos(&todos)?;
+    println!("\nTodo item {} updated successfully", line_number);
+
+    Ok(())
+}
+
 fn parse_txt_line(line: &str) -> TodoItem {
     let mut priority = None;
     let mut context = None;
@@ -549,6 +667,7 @@ fn main() {
             age_filter,
         } => list_todos(all, pr, age_filter),
         Commands::Done { line_number } => mark_done(line_number),
+        Commands::Edit { line_number } => edit_todo(line_number),
         Commands::Pr {
             priority,
             line_number,

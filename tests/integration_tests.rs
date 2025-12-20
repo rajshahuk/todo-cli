@@ -868,3 +868,201 @@ fn test_convert_complex_description() {
 
     teardown_convert();
 }
+
+// Edit command tests
+
+#[test]
+fn test_edit_description() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Original task", None, None)]);
+
+    // Edit description: type new description, press Enter for all other fields
+    let output = run_command_with_input(&["edit", "1"], "Updated task\n\n\n\n\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("Updated task"));
+    assert!(!updated_content.contains("Original task"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_priority() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Buy milk", None, None)]);
+
+    // Keep description, set priority to A, keep rest
+    let output = run_command_with_input(&["edit", "1"], "\nA\n\n\n\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("\"priority\": \"A\""));
+    assert!(updated_content.contains("Buy milk"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_context_and_project() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![TodoItem {
+        priority: None,
+        description: "Send email".to_string(),
+        context: None,
+        project: None,
+        tags: vec![],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+    }];
+    create_test_file_with_todos(todos);
+
+    // Keep description and priority, set context=work, project=Website, keep tags
+    let output = run_command_with_input(&["edit", "1"], "\n\nwork\nWebsite\n\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("\"context\": \"work\""));
+    assert!(updated_content.contains("\"project\": \"Website\""));
+    assert!(updated_content.contains("Send email"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_tags() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Review code", None, None)]);
+
+    // Keep all except tags, set tags to "urgent, important"
+    let output = run_command_with_input(&["edit", "1"], "\n\n\n\nurgent, important\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("\"urgent\""));
+    assert!(updated_content.contains("\"important\""));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_clear_fields() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![TodoItem {
+        priority: Some('A'),
+        description: "Task with metadata".to_string(),
+        context: Some("work".to_string()),
+        project: Some("Project1".to_string()),
+        tags: vec!["tag1".to_string(), "tag2".to_string()],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+    }];
+    create_test_file_with_todos(todos);
+
+    // Keep description, clear priority, context, project, and tags
+    let output = run_command_with_input(&["edit", "1"], "\nclear\nnone\nclear\nnone\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("Task with metadata"));
+    assert!(updated_content.contains("\"priority\": null"));
+    assert!(updated_content.contains("\"context\": null"));
+    assert!(updated_content.contains("\"project\": null"));
+    assert!(updated_content.contains("\"tags\": []"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_keep_current_values() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![TodoItem {
+        priority: Some('B'),
+        description: "Original description".to_string(),
+        context: Some("home".to_string()),
+        project: Some("Personal".to_string()),
+        tags: vec!["test".to_string()],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+    }];
+    create_test_file_with_todos(todos);
+
+    // Press Enter for all fields to keep current values
+    let output = run_command_with_input(&["edit", "1"], "\n\n\n\n\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    // Content should be essentially the same (only formatting might differ)
+    assert!(updated_content.contains("Original description"));
+    assert!(updated_content.contains("\"B\""));
+    assert!(updated_content.contains("home"));
+    assert!(updated_content.contains("Personal"));
+    assert!(updated_content.contains("test"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_invalid_number() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Task 1", None, None)]);
+
+    let output = run_command_with_input(&["edit", "99"], "\n\n\n\n\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("does not exist"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_all_fields() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Old task", None, None)]);
+
+    // Update all fields
+    let output =
+        run_command_with_input(&["edit", "1"], "New task\nC\noffice\nWorkProject\ntag1, tag2\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("New task"));
+    assert!(updated_content.contains("\"C\""));
+    assert!(updated_content.contains("office"));
+    assert!(updated_content.contains("WorkProject"));
+    assert!(updated_content.contains("tag1"));
+    assert!(updated_content.contains("tag2"));
+    assert!(!updated_content.contains("Old task"));
+
+    teardown();
+}

@@ -130,6 +130,33 @@ Mark this item as done?
 (Y/N):
 ```
 
+### Editing Tasks
+
+Edit any field of an existing todo item:
+```bash
+todo-cli edit 1
+```
+
+You'll be prompted interactively for each field:
+```
+Editing todo item 1:
+Press Enter to keep current value, or type new value
+
+Description [Buy milk]: Buy groceries
+Priority (A-Z, or 'clear') [none]: A
+Context (without @) [none]: shopping
+Project (without P:) [none]: Personal
+Tags (comma-separated, without T:) [none]: urgent, today
+
+Todo item 1 updated successfully
+```
+
+Tips for editing:
+- **Keep current value**: Just press Enter without typing anything
+- **Clear a field**: Type `clear` or `none` to remove the value
+- **Multiple tags**: Separate with commas (e.g., `urgent, important, today`)
+- **Priority**: Single letter A-Z, or `clear` to remove
+
 ### Viewing Projects
 
 List all unique projects across all todos:
@@ -158,6 +185,7 @@ This command shows all projects in alphabetical order, including those from comp
 | `list +<time>` | Filter by age (e.g., `+1d`, `+2w`, `+3m`, `+1y`) |
 | `list --all +<time>` | Show all items older than specified duration |
 | `list --pr +<time>` | Show old items sorted by priority |
+| `edit <number>` | Edit any field of a todo item interactively |
 | `done <number>` | Mark item as done (with confirmation) |
 | `pr <priority> <number>` | Set priority A-Z on an item |
 | `pr clear <number>` | Remove priority from an item |
@@ -397,8 +425,8 @@ cargo test --test integration_tests
 ```
 
 The test suite includes:
-- **25 unit tests** - Testing metadata parsing, JSON serialization, and age filtering
-- **34 integration tests** - Testing all CLI commands end-to-end
+- **38 unit tests** - Testing metadata parsing, JSON serialization, and age filtering
+- **42 integration tests** - Testing all CLI commands end-to-end including the edit command
 
 ## Tips
 
