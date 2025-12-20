@@ -1059,8 +1059,10 @@ fn test_edit_all_fields() {
     create_test_file_with_todos(vec![make_todo("Old task", None, None)]);
 
     // Update all fields
-    let output =
-        run_command_with_input(&["edit", "1"], "New task\nC\noffice\nWorkProject\ntag1, tag2\n");
+    let output = run_command_with_input(
+        &["edit", "1"],
+        "New task\nC\noffice\nWorkProject\ntag1, tag2\n",
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("updated successfully"));
