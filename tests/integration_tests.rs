@@ -30,11 +30,21 @@ fn teardown() {
 }
 
 fn get_binary_path() -> String {
-    // Check if release binary exists, otherwise use debug
-    if std::path::Path::new("./target/release/todo-cli").exists() {
-        "./target/release/todo-cli".to_string()
+    // Determine binary name based on platform
+    let binary_name = if cfg!(windows) {
+        "todo-cli.exe"
     } else {
-        "./target/debug/todo-cli".to_string()
+        "todo-cli"
+    };
+
+    // Check if release binary exists, otherwise use debug
+    let release_path = format!("./target/release/{}", binary_name);
+    let debug_path = format!("./target/debug/{}", binary_name);
+
+    if std::path::Path::new(&release_path).exists() {
+        release_path
+    } else {
+        debug_path
     }
 }
 
