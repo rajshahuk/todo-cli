@@ -29,23 +29,32 @@ fn teardown() {
     let _ = fs::remove_file(TEST_TODO_FILE);
 }
 
-fn get_binary_path() -> String {
-    // Determine binary name based on platform
-    let binary_name = if cfg!(windows) {
-        "todo-cli.exe"
-    } else {
-        "todo-cli"
-    };
-
-    // Check if release binary exists, otherwise use debug
-    let release_path = format!("./target/release/{}", binary_name);
-    let debug_path = format!("./target/debug/{}", binary_name);
-
-    if std::path::Path::new(&release_path).exists() {
-        release_path
-    } else {
-        debug_path
-    }
+fn get_binary_path() -> std::path::PathBuf {
+    // Use cargo's built-in test binary path
+    // This works across all platforms and test scenarios
+    std::env::current_exe()
+        .ok()
+        .map(|mut path| {
+            path.pop();
+            if path.ends_with("deps") {
+                path.pop();
+            }
+            path.push(if cfg!(windows) {
+                "todo-cli.exe"
+            } else {
+                "todo-cli"
+            });
+            path
+        })
+        .unwrap_or_else(|| {
+            // Fallback to the old method if env path doesn't work
+            let binary_name = if cfg!(windows) {
+                "todo-cli.exe"
+            } else {
+                "todo-cli"
+            };
+            std::path::PathBuf::from(format!("./target/debug/{}", binary_name))
+        })
 }
 
 fn run_command(args: &[&str]) -> std::process::Output {
