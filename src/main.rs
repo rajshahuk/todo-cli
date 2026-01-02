@@ -63,14 +63,25 @@ struct TodoItem {
     tags: Vec<String>,
     start_date: String,
     done_date: Option<String>,
+    #[serde(default)]
+    due_date: Option<String>,
 }
 
 // Parse user input to extract metadata
-fn parse_metadata(input: &str) -> (String, Option<String>, Option<String>, Vec<String>) {
+fn parse_metadata(
+    input: &str,
+) -> (
+    String,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+) {
     let mut description_words = Vec::new();
     let mut context = None;
     let mut project = None;
     let mut tags = Vec::new();
+    let mut due_date = None;
 
     for word in input.split_whitespace() {
         if let Some(stripped) = word.strip_prefix("@") {
@@ -85,18 +96,32 @@ fn parse_metadata(input: &str) -> (String, Option<String>, Option<String>, Vec<S
             // Skip all P: words, not just the first
         } else if word.starts_with("T:") || word.starts_with("t:") {
             tags.push(word[2..].to_string());
+        } else if word.starts_with("Due:") || word.starts_with("due:") {
+            if due_date.is_none() {
+                let date_str = &word[4..];
+                due_date = parse_due_date_input(date_str);
+            }
         } else {
             description_words.push(word);
         }
     }
 
     let description = description_words.join(" ");
-    (description, context, project, tags)
+    (description, context, project, tags, due_date)
 }
 
 impl TodoItem {
     fn is_done(&self) -> bool {
         self.done_date.is_some()
+    }
+
+    fn is_overdue(&self) -> bool {
+        if let Some(due) = &self.due_date {
+            let today = Local::now().format("%Y/%m/%d").to_string();
+            due < &today
+        } else {
+            false
+        }
     }
 
     fn display(&self) {
@@ -110,6 +135,15 @@ impl TodoItem {
 
         // Start date
         print!("S:{} ", self.start_date);
+
+        // Due date - show after start date, before description
+        if let Some(due) = &self.due_date {
+            if self.is_overdue() {
+                print!("Due:{} ", due.red().bold()); // Overdue in RED and BOLD
+            } else {
+                print!("Due:{} ", due); // Normal display
+            }
+        }
 
         // Description
         print!("{} ", self.description);
@@ -236,13 +270,92 @@ fn calculate_cutoff_date(value: i64, unit: char) -> String {
     cutoff.format("%Y/%m/%d").to_string()
 }
 
+// Calculate a future date based on duration (inverse of calculate_cutoff_date)
+fn calculate_future_date(value: i64, unit: char) -> String {
+    use chrono::Duration;
+
+    let now = Local::now();
+    let future = match unit {
+        'd' => now + Duration::days(value),
+        'w' => now + Duration::weeks(value),
+        'm' => now + Duration::days(value * 30), // Approximate month as 30 days
+        'y' => now + Duration::days(value * 365), // Approximate year as 365 days
+        _ => now,
+    };
+
+    future.format("%Y/%m/%d").to_string()
+}
+
+// Validate date string format (basic check)
+// Expected format: YYYY/MM/DD
+fn validate_date_format(date_str: &str) -> bool {
+    let parts: Vec<&str> = date_str.split('/').collect();
+
+    if parts.len() != 3 {
+        return false;
+    }
+
+    // Check year (4 digits)
+    if parts[0].len() != 4 || !parts[0].chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+
+    // Check month (2 digits, 01-12)
+    if parts[1].len() != 2 || !parts[1].chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let month: u32 = parts[1].parse().unwrap_or(0);
+    if !(1..=12).contains(&month) {
+        return false;
+    }
+
+    // Check day (2 digits, 01-31)
+    if parts[2].len() != 2 || !parts[2].chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let day: u32 = parts[2].parse().unwrap_or(0);
+    if !(1..=31).contains(&day) {
+        return false;
+    }
+
+    true
+}
+
+// Parse due date input - handles both absolute dates and relative dates
+// Absolute: "2025-12-25" or "2025/12/25"
+// Relative: "+3d", "+2w", "+1m"
+// Returns: Option<String> in YYYY/MM/DD format, or None if invalid
+fn parse_due_date_input(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+
+    // Check if it's a relative date (starts with '+')
+    if trimmed.starts_with('+') {
+        // Parse like age filter: +3d, +2w, +1m
+        if let Some((value, unit)) = parse_age_filter(trimmed) {
+            // Calculate future date instead of past date
+            return Some(calculate_future_date(value, unit));
+        }
+        return None;
+    }
+
+    // Handle absolute date - accept both YYYY-MM-DD and YYYY/MM/DD
+    let normalized = trimmed.replace('-', "/");
+
+    // Basic validation: check format YYYY/MM/DD
+    if validate_date_format(&normalized) {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
 fn add_todo(description: &str) -> io::Result<()> {
     check_and_create_file()?;
 
     let mut todos = read_todos()?;
 
     // Parse metadata from description
-    let (clean_desc, context, project, tags) = parse_metadata(description);
+    let (clean_desc, context, project, tags, due_date) = parse_metadata(description);
 
     let new_item = TodoItem {
         line_number: todos.len() + 1,
@@ -253,6 +366,7 @@ fn add_todo(description: &str) -> io::Result<()> {
         tags,
         start_date: Local::now().format("%Y/%m/%d").to_string(),
         done_date: None,
+        due_date,
     };
 
     todos.push(new_item);
@@ -301,13 +415,21 @@ fn list_todos(
         return Ok(());
     }
 
-    // Sort by priority if requested
+    // Sort by due date first (items with due dates at top, earliest first)
+    todos.sort_by(|a, b| match (&a.due_date, &b.due_date) {
+        (Some(due_a), Some(due_b)) => due_a.cmp(due_b),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.line_number.cmp(&b.line_number),
+    });
+
+    // Sort by priority if requested (stable sort to preserve due date ordering)
     if sort_by_priority {
         todos.sort_by(|a, b| match (a.priority, b.priority) {
             (Some(p1), Some(p2)) => p1.cmp(&p2),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.line_number.cmp(&b.line_number),
+            (None, None) => std::cmp::Ordering::Equal, // Preserve existing order
         });
     }
 
@@ -350,6 +472,9 @@ fn mark_done(line_number: usize) -> io::Result<()> {
     }
     for tag in &todo.tags {
         print!(" T:{}", tag);
+    }
+    if let Some(due) = &todo.due_date {
+        print!(" Due:{}", due);
     }
     println!(" S:{}", todo.start_date);
     print!("(Y/N): ");
@@ -468,6 +593,11 @@ fn edit_todo(line_number: usize) -> io::Result<()> {
     };
     let new_tags = read_input_with_default("Tags (comma-separated, without T:)", &current_tags)?;
 
+    // Edit due date
+    let current_due = todo.due_date.as_deref().unwrap_or("none");
+    let new_due_date =
+        read_input_with_default("Due date (YYYY-MM-DD, +3d, +2w, or 'clear')", current_due)?;
+
     // Apply changes
     let todo_mut = &mut todos[line_number - 1];
 
@@ -518,6 +648,20 @@ fn edit_todo(line_number: usize) -> io::Result<()> {
         }
     }
 
+    if let Some(due_str) = new_due_date {
+        if due_str.to_lowercase() == "clear" || due_str.to_lowercase() == "none" {
+            todo_mut.due_date = None;
+        } else if let Some(parsed_date) = parse_due_date_input(&due_str) {
+            todo_mut.due_date = Some(parsed_date);
+        } else {
+            eprintln!(
+                "Warning: Invalid due date format '{}', keeping current value",
+                due_str
+            );
+            eprintln!("Expected format: YYYY-MM-DD or +3d, +2w, +1m, +1y");
+        }
+    }
+
     write_todos(&todos)?;
     println!("\nTodo item {} updated successfully", line_number);
 
@@ -531,6 +675,7 @@ fn parse_txt_line(line: &str) -> TodoItem {
     let mut tags = Vec::new();
     let mut start_date = String::new();
     let mut done_date = None;
+    let mut due_date = None;
     let mut description_words = Vec::new();
 
     let trimmed = line.trim();
@@ -561,6 +706,10 @@ fn parse_txt_line(line: &str) -> TodoItem {
             start_date = word[2..].to_string();
         } else if (word.starts_with("D:") || word.starts_with("d:")) && word.len() > 2 {
             done_date = Some(word[2..].to_string());
+        } else if (word.starts_with("Due:") || word.starts_with("due:")) && word.len() > 4 {
+            if due_date.is_none() {
+                due_date = Some(word[4..].to_string());
+            }
         } else {
             description_words.push(word);
         }
@@ -575,6 +724,7 @@ fn parse_txt_line(line: &str) -> TodoItem {
         tags,
         start_date,
         done_date,
+        due_date,
     }
 }
 
@@ -689,7 +839,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_simple() {
         let input = "Buy milk";
-        let (desc, context, project, tags) = parse_metadata(input);
+        let (desc, context, project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Buy milk");
         assert_eq!(context, None);
@@ -700,7 +850,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_with_context() {
         let input = "Buy milk @shopping";
-        let (desc, context, project, tags) = parse_metadata(input);
+        let (desc, context, project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Buy milk");
         assert_eq!(context, Some("shopping".to_string()));
@@ -711,7 +861,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_with_project() {
         let input = "Buy milk P:Personal";
-        let (desc, context, project, tags) = parse_metadata(input);
+        let (desc, context, project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Buy milk");
         assert_eq!(context, None);
@@ -722,7 +872,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_with_tags() {
         let input = "Review code T:urgent T:backend";
-        let (desc, context, project, tags) = parse_metadata(input);
+        let (desc, context, project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Review code");
         assert_eq!(context, None);
@@ -735,7 +885,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_complex() {
         let input = "Send email about meeting @work P:ProjectX T:urgent T:important";
-        let (desc, context, project, tags) = parse_metadata(input);
+        let (desc, context, project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Send email about meeting");
         assert_eq!(context, Some("work".to_string()));
@@ -748,7 +898,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_first_context_only() {
         let input = "Task @first @second";
-        let (desc, context, _project, _tags) = parse_metadata(input);
+        let (desc, context, _project, _tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Task");
         assert_eq!(context, Some("first".to_string()));
@@ -757,7 +907,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_first_project_only() {
         let input = "Task P:First P:Second";
-        let (desc, _context, project, _tags) = parse_metadata(input);
+        let (desc, _context, project, _tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Task");
         assert_eq!(project, Some("First".to_string()));
@@ -766,7 +916,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_lowercase_project() {
         let input = "Buy milk p:Personal";
-        let (desc, _context, project, _tags) = parse_metadata(input);
+        let (desc, _context, project, _tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Buy milk");
         assert_eq!(project, Some("Personal".to_string()));
@@ -775,7 +925,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_lowercase_tags() {
         let input = "Fix bug t:urgent t:backend";
-        let (desc, _context, _project, tags) = parse_metadata(input);
+        let (desc, _context, _project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Fix bug");
         assert_eq!(tags.len(), 2);
@@ -786,7 +936,7 @@ mod tests {
     #[test]
     fn test_parse_metadata_mixed_case() {
         let input = "Task p:Project1 T:tag1 t:tag2 P:Project2";
-        let (desc, _context, project, tags) = parse_metadata(input);
+        let (desc, _context, project, tags, _due_date) = parse_metadata(input);
 
         assert_eq!(desc, "Task");
         assert_eq!(project, Some("Project1".to_string())); // First one wins
@@ -806,6 +956,7 @@ mod tests {
             tags: Vec::new(),
             start_date: "2025/11/29".to_string(),
             done_date: Some("2025/11/30".to_string()),
+            due_date: None,
         };
 
         assert!(todo.is_done());
@@ -822,6 +973,7 @@ mod tests {
             tags: Vec::new(),
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         };
 
         assert!(!todo.is_done());
@@ -838,6 +990,7 @@ mod tests {
             tags: vec!["urgent".to_string()],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         };
 
         let json = serde_json::to_string(&todo).unwrap();

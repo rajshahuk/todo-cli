@@ -17,6 +17,8 @@ struct TodoItem {
     tags: Vec<String>,
     start_date: String,
     done_date: Option<String>,
+    #[serde(default)]
+    due_date: Option<String>,
 }
 
 fn setup() {
@@ -99,6 +101,7 @@ fn make_todo(description: &str, priority: Option<char>, done_date: Option<&str>)
         tags: vec![],
         start_date: "2025/11/29".to_string(),
         done_date: done_date.map(|s| s.to_string()),
+        due_date: None,
     }
 }
 
@@ -168,6 +171,7 @@ fn test_list_filters_done_items() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -177,6 +181,7 @@ fn test_list_filters_done_items() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: Some("2025/11/30".to_string()),
+            due_date: None,
         },
     ];
     create_test_file_with_todos(todos);
@@ -204,6 +209,7 @@ fn test_list_all_shows_done_items() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -213,6 +219,7 @@ fn test_list_all_shows_done_items() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: Some("2025/11/30".to_string()),
+            due_date: None,
         },
     ];
     create_test_file_with_todos(todos);
@@ -240,6 +247,7 @@ fn test_list_priority_sorting() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: Some('A'),
@@ -249,6 +257,7 @@ fn test_list_priority_sorting() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: Some('B'),
@@ -258,6 +267,7 @@ fn test_list_priority_sorting() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
     ];
     create_test_file_with_todos(todos);
@@ -497,6 +507,7 @@ fn test_projects_single() {
         tags: vec![],
         start_date: "2025/11/29".to_string(),
         done_date: None,
+        due_date: None,
     };
 
     create_test_file_with_todos(vec![todo]);
@@ -524,6 +535,7 @@ fn test_projects_multiple_unique() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -533,6 +545,7 @@ fn test_projects_multiple_unique() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -542,6 +555,7 @@ fn test_projects_multiple_unique() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
     ];
 
@@ -579,6 +593,7 @@ fn test_projects_with_duplicates() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -588,6 +603,7 @@ fn test_projects_with_duplicates() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -597,6 +613,7 @@ fn test_projects_with_duplicates() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
     ];
 
@@ -628,6 +645,7 @@ fn test_projects_includes_done_items() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: Some("2025/11/30".to_string()),
+            due_date: None,
         },
         TodoItem {
             priority: None,
@@ -637,6 +655,7 @@ fn test_projects_includes_done_items() {
             tags: vec![],
             start_date: "2025/11/29".to_string(),
             done_date: None,
+            due_date: None,
         },
     ];
 
@@ -943,6 +962,7 @@ fn test_edit_context_and_project() {
         tags: vec![],
         start_date: "2025/11/29".to_string(),
         done_date: None,
+        due_date: None,
     }];
     create_test_file_with_todos(todos);
 
@@ -993,6 +1013,7 @@ fn test_edit_clear_fields() {
         tags: vec!["tag1".to_string(), "tag2".to_string()],
         start_date: "2025/11/29".to_string(),
         done_date: None,
+        due_date: None,
     }];
     create_test_file_with_todos(todos);
 
@@ -1025,6 +1046,7 @@ fn test_edit_keep_current_values() {
         tags: vec!["test".to_string()],
         start_date: "2025/11/29".to_string(),
         done_date: None,
+        due_date: None,
     }];
     create_test_file_with_todos(todos);
 
@@ -1084,6 +1106,104 @@ fn test_edit_all_fields() {
     assert!(updated_content.contains("tag1"));
     assert!(updated_content.contains("tag2"));
     assert!(!updated_content.contains("Old task"));
+
+    teardown();
+}
+
+#[test]
+fn test_add_todo_with_absolute_due_date() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    run_command_with_input(&["add", "Task with due date Due:2026-06-15"], "Y\n");
+
+    let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(content.contains("Task with due date"));
+    assert!(content.contains("2026/06/15"));
+    assert!(content.contains("due_date"));
+
+    teardown();
+}
+
+#[test]
+fn test_add_todo_with_relative_due_date() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    run_command_with_input(&["add", "Task due in 3 days Due:+3d"], "Y\n");
+
+    let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(content.contains("Task due in 3 days"));
+    assert!(content.contains("due_date"));
+    // The actual date will be calculated, so we just check it exists
+
+    teardown();
+}
+
+#[test]
+fn test_list_shows_due_dates() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    run_command_with_input(&["add", "Task 1 Due:2026-01-10"], "Y\n");
+    run_command_with_input(&["add", "Task 2 Due:2026-01-05"], "Y\n");
+    run_command_with_input(&["add", "Task 3"], "Y\n");
+
+    let output = run_command(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Check that due dates are shown
+    assert!(stdout.contains("Due:2026/01/05"));
+    assert!(stdout.contains("Due:2026/01/10"));
+
+    // Task 2 with earlier due date should appear before Task 1
+    let task2_pos = stdout.find("Task 2").unwrap();
+    let task1_pos = stdout.find("Task 1").unwrap();
+    assert!(
+        task2_pos < task1_pos,
+        "Tasks should be sorted by due date (earliest first)"
+    );
+
+    teardown();
+}
+
+#[test]
+fn test_edit_due_date() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Task to edit", None, None)]);
+
+    // Edit and set a due date
+    let output = run_command_with_input(&["edit", "1"], "\n\n\n\n\n2026-07-15\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("2026/07/15"));
+    assert!(updated_content.contains("due_date"));
+
+    teardown();
+}
+
+#[test]
+fn test_edit_clear_due_date() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // First create a todo with a due date
+    run_command_with_input(&["add", "Task with due Due:2026-08-20"], "Y\n");
+
+    // Edit and clear the due date
+    let output = run_command_with_input(&["edit", "1"], "\n\n\n\n\nclear\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("updated successfully"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    let todos: Vec<TodoItem> = serde_json::from_str(&updated_content).unwrap();
+    assert!(todos[0].due_date.is_none());
 
     teardown();
 }
