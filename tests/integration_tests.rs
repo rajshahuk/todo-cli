@@ -1207,3 +1207,73 @@ fn test_edit_clear_due_date() {
 
     teardown();
 }
+
+#[test]
+fn test_list_hide_waiting() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Add tasks with and without @WF context
+    run_command_with_input(&["add", "Active task"], "Y\n");
+    run_command_with_input(&["add", "Waiting task @WF"], "Y\n");
+    run_command_with_input(&["add", "Another active @work"], "Y\n");
+
+    // List without --hide-waiting should show all tasks
+    let output = run_command(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Active task"));
+    assert!(stdout.contains("Waiting task"));
+    assert!(stdout.contains("Another active"));
+
+    // List with --hide-waiting should filter out @WF tasks
+    let output = run_command(&["list", "--hide-waiting"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Active task"));
+    assert!(!stdout.contains("Waiting task"));
+    assert!(stdout.contains("Another active"));
+
+    teardown();
+}
+
+#[test]
+fn test_list_hide_waiting_case_insensitive() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Add tasks with different case variations of @WF
+    run_command_with_input(&["add", "Task 1 @wf"], "Y\n");
+    run_command_with_input(&["add", "Task 2 @WF"], "Y\n");
+    run_command_with_input(&["add", "Task 3 @Wf"], "Y\n");
+    run_command_with_input(&["add", "Task 4 @work"], "Y\n");
+
+    // List with --hide-waiting should filter out all WF variations
+    let output = run_command(&["list", "--hide-waiting"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(!stdout.contains("Task 1"));
+    assert!(!stdout.contains("Task 2"));
+    assert!(!stdout.contains("Task 3"));
+    assert!(stdout.contains("Task 4"));
+
+    teardown();
+}
+
+#[test]
+fn test_list_hide_waiting_with_no_results() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Add only waiting tasks
+    run_command_with_input(&["add", "Waiting 1 @WF"], "Y\n");
+    run_command_with_input(&["add", "Waiting 2 @wf"], "Y\n");
+
+    // List with --hide-waiting should show "No todo items found"
+    let output = run_command(&["list", "--hide-waiting"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("No todo items found"));
+
+    teardown();
+}

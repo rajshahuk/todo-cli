@@ -30,6 +30,9 @@ enum Commands {
         pr: bool,
         /// Filter by age (e.g., +1d for older than 1 day, +2w for 2 weeks, +3m for 3 months, +1y for 1 year)
         age_filter: Option<String>,
+        /// Hide items marked as waiting (@WF)
+        #[arg(long)]
+        hide_waiting: bool,
     },
     /// Mark a todo item as done
     Done { line_number: usize },
@@ -379,6 +382,7 @@ fn list_todos(
     show_all: bool,
     sort_by_priority: bool,
     age_filter: Option<String>,
+    hide_waiting: bool,
 ) -> io::Result<()> {
     check_and_create_file()?;
 
@@ -408,6 +412,17 @@ fn list_todos(
                 return Ok(());
             }
         }
+    }
+
+    // Filter out waiting items if --hide-waiting is specified
+    if hide_waiting {
+        todos.retain(|todo| {
+            if let Some(context) = &todo.context {
+                context.to_uppercase() != "WF"
+            } else {
+                true
+            }
+        });
     }
 
     if todos.is_empty() {
@@ -815,7 +830,8 @@ fn main() {
             all,
             pr,
             age_filter,
-        } => list_todos(all, pr, age_filter),
+            hide_waiting,
+        } => list_todos(all, pr, age_filter, hide_waiting),
         Commands::Done { line_number } => mark_done(line_number),
         Commands::Edit { line_number } => edit_todo(line_number),
         Commands::Pr {

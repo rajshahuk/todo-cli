@@ -10,8 +10,10 @@ A fast, colorful command-line todo list manager written in Rust. Keep track of y
 - 📊 **Priority management** (A-Z, where A is highest)
 - 🏷️ **Organize with contexts** (`@work`, `@home`), **projects** (`P:ProjectName`), and **tags** (`T:urgent`)
 - ✅ **Track completion** with automatic date tracking
+- 📅 **Due dates** - set absolute or relative due dates, with automatic sorting and overdue highlighting
 - 🔍 **Flexible listing** - view all tasks or filter by completion status
 - ⏰ **Age-based filtering** - find todos older than a specific duration (e.g., `+1d`, `+2w`, `+1m`)
+- 🚫 **Hide waiting items** - filter out tasks marked as @WF (waiting for)
 - 📁 **JSON storage** - human-readable, easy to backup or sync
 
 ## Quick Start
@@ -52,7 +54,14 @@ Add a task with context, project, and tags:
 todo-cli add "Review pull request @work P:Backend T:urgent T:review"
 ```
 
-The metadata markers (`@`, `P:`, `T:`) can appear anywhere in your description:
+Add a task with a due date:
+```bash
+todo-cli add "Submit report Due:2026-06-30"      # Absolute date
+todo-cli add "Follow up on email Due:+3d"        # Relative date (3 days from now)
+todo-cli add "Call client Due:+1w @work"         # Combine with other metadata
+```
+
+The metadata markers (`@`, `P:`, `T:`, `Due:`) can appear anywhere in your description:
 ```bash
 todo-cli add "Email team about P:Launch campaign tomorrow"
 # Result: description="Email team about campaign tomorrow", project="Launch"
@@ -89,19 +98,27 @@ Supported time units for age filtering:
 - `m` = months
 - `y` = years
 
+Hide waiting items (marked with @WF):
+```bash
+todo-cli list --hide-waiting    # Filter out items with @WF context
+```
+
 Combine filters and flags:
 ```bash
-todo-cli list --all --pr        # All todos sorted by priority
-todo-cli list --all +1w         # All todos (including done) older than 1 week
-todo-cli list --pr +3d          # Uncompleted todos older than 3 days, sorted by priority
+todo-cli list --all --pr           # All todos sorted by priority
+todo-cli list --all +1w            # All todos (including done) older than 1 week
+todo-cli list --pr +3d             # Uncompleted todos older than 3 days, sorted by priority
+todo-cli list --hide-waiting --pr  # Active tasks (no @WF) sorted by priority
 ```
 
 Example output:
 ```
-2 (A) S:2025/11/30 Send email @work T:important
-3 (B) S:2025/11/30 Review code P:ProjectX T:review T:backend
+2 (A) Due:2026/01/15 S:2025/11/30 Send email @work T:important
+3 (B) Due:2026/01/20 S:2025/11/30 Review code P:ProjectX T:review T:backend
 1 S:2025/11/30 Buy milk @shopping P:Personal T:urgent
 ```
+
+Note: Items with due dates are automatically sorted to appear first, with the earliest due dates at the top. Overdue items are highlighted in red.
 
 ### Setting Priorities
 
@@ -147,6 +164,7 @@ Priority (A-Z, or 'clear') [none]: A
 Context (without @) [none]: shopping
 Project (without P:) [none]: Personal
 Tags (comma-separated, without T:) [none]: urgent, today
+Due date (YYYY-MM-DD, +3d, +2w, or 'clear') [none]: 2026-06-30
 
 Todo item 1 updated successfully
 ```
@@ -156,6 +174,7 @@ Tips for editing:
 - **Clear a field**: Type `clear` or `none` to remove the value
 - **Multiple tags**: Separate with commas (e.g., `urgent, important, today`)
 - **Priority**: Single letter A-Z, or `clear` to remove
+- **Due dates**: Use absolute (YYYY-MM-DD) or relative (+3d, +2w, +1m, +1y) formats
 
 ### Viewing Projects
 
@@ -178,14 +197,16 @@ This command shows all projects in alphabetical order, including those from comp
 
 | Command | Description |
 |---------|-------------|
-| `add "description"` | Add a new todo item |
-| `list` | Show uncompleted items |
+| `add "description"` | Add a new todo item (supports `@context`, `P:project`, `T:tag`, `Due:date`) |
+| `list` | Show uncompleted items (items with due dates appear first) |
 | `list --all` | Show all items including completed |
 | `list --pr` | Show items sorted by priority |
+| `list --hide-waiting` | Hide items marked as waiting (@WF) |
 | `list +<time>` | Filter by age (e.g., `+1d`, `+2w`, `+3m`, `+1y`) |
 | `list --all +<time>` | Show all items older than specified duration |
 | `list --pr +<time>` | Show old items sorted by priority |
-| `edit <number>` | Edit any field of a todo item interactively |
+| `list --hide-waiting --pr` | Active items (no @WF) sorted by priority |
+| `edit <number>` | Edit any field including due date interactively |
 | `done <number>` | Mark item as done (with confirmation) |
 | `pr <priority> <number>` | Set priority A-Z on an item |
 | `pr clear <number>` | Remove priority from an item |
@@ -231,6 +252,73 @@ Use `T:` or `t:` (case-insensitive) to add flexible labels. You can add as many 
 
 ```bash
 todo-cli add "Fix login bug T:urgent T:bug t:frontend"  # Mixed case works
+```
+
+## Due Dates
+
+Set deadlines for your tasks using the `Due:` marker. Tasks with due dates are automatically sorted to the top of your list, with the earliest dates first. Overdue items are highlighted in red for visibility.
+
+### Absolute Dates
+
+Specify an exact due date using YYYY-MM-DD or YYYY/MM/DD format:
+
+```bash
+todo-cli add "Submit tax return Due:2026-04-15"
+todo-cli add "Renew passport Due:2026/08/20"
+```
+
+### Relative Dates
+
+Use relative dates to set deadlines based on the current date:
+
+```bash
+todo-cli add "Follow up on proposal Due:+3d"    # 3 days from now
+todo-cli add "Weekly review Due:+1w"            # 1 week from now
+todo-cli add "Quarterly planning Due:+1m"       # 1 month from now
+todo-cli add "Annual review Due:+1y"            # 1 year from now
+```
+
+Supported units:
+- `d` - days
+- `w` - weeks (7 days)
+- `m` - months (30 days)
+- `y` - years (365 days)
+
+### Managing Due Dates
+
+**Edit a due date:**
+```bash
+todo-cli edit 1
+# At the "Due date" prompt, enter a new date or press Enter to keep current
+```
+
+**Clear a due date:**
+```bash
+todo-cli edit 1
+# At the "Due date" prompt, type "clear" or "none"
+```
+
+### Automatic Sorting
+
+When you list your todos, items are automatically sorted by due date:
+1. Items with due dates appear first
+2. Sorted by earliest date first
+3. Overdue items are highlighted in **red** and **bold**
+4. Items without due dates appear after
+
+This sorting is applied before priority sorting (when using `--pr`), so you can have due date order within priority groups.
+
+### Examples
+
+```bash
+# Add a task with a tight deadline
+todo-cli add "Complete project proposal Due:+2d @work P:ClientA T:urgent"
+
+# View your upcoming deadlines
+todo-cli list
+
+# See only prioritized tasks with due dates
+todo-cli list --pr
 ```
 
 ## Age-Based Filtering
@@ -299,6 +387,7 @@ When viewing your list, different elements are color-coded for quick identificat
 
 - **Line numbers**: Cyan
 - **Priorities**: Magenta
+- **Due dates**: Normal text (red bold for overdue items)
 - **Contexts** (`@`): Green
 - **Projects** (`P:`): Yellow
 - **Tags** (`T:`): Bright blue
@@ -318,7 +407,8 @@ Todos are stored in `todo.json` in your current working directory. The file is a
     "project": "Personal",
     "tags": ["urgent"],
     "start_date": "2025/11/30",
-    "done_date": null
+    "done_date": null,
+    "due_date": "2026/01/15"
   },
   {
     "priority": null,
@@ -327,7 +417,8 @@ Todos are stored in `todo.json` in your current working directory. The file is a
     "project": null,
     "tags": ["important", "today"],
     "start_date": "2025/11/30",
-    "done_date": "2025/12/01"
+    "done_date": "2025/12/01",
+    "due_date": null
   }
 ]
 ```
@@ -343,6 +434,7 @@ Todos are stored in `todo.json` in your current working directory. The file is a
 | `tags` | array | Zero or more tags from `T:tag` markers |
 | `start_date` | string | Date created (yyyy/mm/dd), auto-generated |
 | `done_date` | string or null | Date completed (yyyy/mm/dd), set when done |
+| `due_date` | string or null | Date due (yyyy/mm/dd), from `Due:` marker |
 
 The JSON format makes it easy to:
 - Back up your todos (just copy the file)
@@ -425,8 +517,8 @@ cargo test --test integration_tests
 ```
 
 The test suite includes:
-- **38 unit tests** - Testing metadata parsing, JSON serialization, and age filtering
-- **42 integration tests** - Testing all CLI commands end-to-end including the edit command
+- **38 unit tests** - Testing metadata parsing, JSON serialization, age filtering, and date handling
+- **50 integration tests** - Testing all CLI commands end-to-end including edit, due dates, and filtering
 
 ## Tips
 
@@ -443,7 +535,7 @@ The test suite includes:
 
 **Morning routine:**
 ```bash
-todo-cli list --pr  # Review prioritized tasks
+todo-cli list --pr --hide-waiting  # Review active prioritized tasks
 ```
 
 **Capture tasks quickly:**
@@ -466,6 +558,21 @@ todo-cli list --pr | grep "P:Website"  # See all website tasks
 **Stale task cleanup:**
 ```bash
 todo-cli list +1m    # Find tasks sitting for over a month
+```
+
+**Focus on actionable tasks:**
+```bash
+todo-cli list --hide-waiting  # Hide items waiting on others (@WF)
+```
+
+**Upcoming deadlines:**
+```bash
+todo-cli list  # Items with due dates automatically appear first
+```
+
+**Set deadlines for follow-ups:**
+```bash
+todo-cli add "Follow up with client Due:+3d @work"  # Due in 3 days
 ```
 
 ## License
