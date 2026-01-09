@@ -430,21 +430,73 @@ fn list_todos(
         return Ok(());
     }
 
-    // Sort by due date first (items with due dates at top, earliest first)
-    todos.sort_by(|a, b| match (&a.due_date, &b.due_date) {
-        (Some(due_a), Some(due_b)) => due_a.cmp(due_b),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => a.line_number.cmp(&b.line_number),
+    // Sort todos with smart prioritization:
+    // 1. Items with BOTH due date AND priority (sorted by priority, then by due date)
+    // 2. Items with due date only (sorted by due date)
+    // 3. Items with priority only (sorted by priority)
+    // 4. Items with neither (sorted by line number)
+    todos.sort_by(|a, b| {
+        use std::cmp::Ordering;
+
+        match (&a.due_date, &a.priority, &b.due_date, &b.priority) {
+            // Both items have due date AND priority
+            (Some(due_a), Some(pri_a), Some(due_b), Some(pri_b)) => {
+                // First compare by priority, then by due date
+                match pri_a.cmp(pri_b) {
+                    Ordering::Equal => due_a.cmp(due_b),
+                    other => other,
+                }
+            }
+            // a has both, b doesn't - a comes first
+            (Some(_), Some(_), _, _) => Ordering::Less,
+            // b has both, a doesn't - b comes first
+            (_, _, Some(_), Some(_)) => Ordering::Greater,
+
+            // Both have due date but no priority
+            (Some(due_a), None, Some(due_b), None) => due_a.cmp(due_b),
+            // a has due date only, b has priority only - a comes first
+            (Some(_), None, None, Some(_)) => Ordering::Less,
+            // a has due date only, b has neither - a comes first
+            (Some(_), None, None, None) => Ordering::Less,
+            // b has due date only, a has priority only - b comes first
+            (None, Some(_), Some(_), None) => Ordering::Greater,
+            // b has due date only, a has neither - b comes first
+            (None, None, Some(_), None) => Ordering::Greater,
+
+            // Both have priority but no due date
+            (None, Some(pri_a), None, Some(pri_b)) => pri_a.cmp(pri_b),
+            // a has priority only, b has neither - a comes first
+            (None, Some(_), None, None) => Ordering::Less,
+            // b has priority only, a has neither - b comes first
+            (None, None, None, Some(_)) => Ordering::Greater,
+
+            // Neither has due date or priority
+            (None, None, None, None) => a.line_number.cmp(&b.line_number),
+        }
     });
 
-    // Sort by priority if requested (stable sort to preserve due date ordering)
+    // If --pr flag is used, apply additional priority sorting (legacy behavior)
     if sort_by_priority {
-        todos.sort_by(|a, b| match (a.priority, b.priority) {
-            (Some(p1), Some(p2)) => p1.cmp(&p2),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal, // Preserve existing order
+        // The --pr flag now just forces priority sorting for items without due dates
+        // Items with due dates are already optimally sorted above
+        todos.sort_by(|a, b| {
+            use std::cmp::Ordering;
+
+            // Keep items with due dates in their current order
+            match (&a.due_date, &b.due_date) {
+                (Some(_), Some(_)) => Ordering::Equal, // Preserve order
+                (Some(_), None) => Ordering::Less,     // Items with due dates stay first
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => {
+                    // For items without due dates, sort by priority
+                    match (a.priority, b.priority) {
+                        (Some(p1), Some(p2)) => p1.cmp(&p2),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => Ordering::Equal,
+                    }
+                }
+            }
         });
     }
 

@@ -11,6 +11,7 @@ A fast, colorful command-line todo list manager written in Rust. Keep track of y
 - 🏷️ **Organize with contexts** (`@work`, `@home`), **projects** (`P:ProjectName`), and **tags** (`T:urgent`)
 - ✅ **Track completion** with automatic date tracking
 - 📅 **Due dates** - set absolute or relative due dates, with automatic sorting and overdue highlighting
+- 🎯 **Smart sorting** - items with both due date and priority automatically appear first
 - 🔍 **Flexible listing** - view all tasks or filter by completion status
 - ⏰ **Age-based filtering** - find todos older than a specific duration (e.g., `+1d`, `+2w`, `+1m`)
 - 🚫 **Hide waiting items** - filter out tasks marked as @WF (waiting for)
@@ -115,10 +116,18 @@ Example output:
 ```
 2 (A) Due:2026/01/15 S:2025/11/30 Send email @work T:important
 3 (B) Due:2026/01/20 S:2025/11/30 Review code P:ProjectX T:review T:backend
+4 Due:2026/01/25 S:2025/11/30 Follow up with client @work
+5 (C) S:2025/11/30 Plan meeting P:ProjectX
 1 S:2025/11/30 Buy milk @shopping P:Personal T:urgent
 ```
 
-Note: Items with due dates are automatically sorted to appear first, with the earliest due dates at the top. Overdue items are highlighted in red.
+Note: Items are automatically sorted by importance:
+1. **Items with BOTH due date AND priority** appear first (sorted by priority, then by due date)
+2. **Items with due date only** appear next (sorted by earliest due date)
+3. **Items with priority only** appear next (sorted by priority)
+4. **Items with neither** appear last (sorted by line number)
+
+Overdue items are highlighted in red and bold.
 
 ### Setting Priorities
 
@@ -198,9 +207,9 @@ This command shows all projects in alphabetical order, including those from comp
 | Command | Description |
 |---------|-------------|
 | `add "description"` | Add a new todo item (supports `@context`, `P:project`, `T:tag`, `Due:date`) |
-| `list` | Show uncompleted items (items with due dates appear first) |
+| `list` | Show uncompleted items (smart sorted: items with due date+priority first) |
 | `list --all` | Show all items including completed |
-| `list --pr` | Show items sorted by priority |
+| `list --pr` | Show items sorted by priority (preserves smart sorting for items with due dates) |
 | `list --hide-waiting` | Hide items marked as waiting (@WF) |
 | `list +<time>` | Filter by age (e.g., `+1d`, `+2w`, `+3m`, `+1y`) |
 | `list --all +<time>` | Show all items older than specified duration |
@@ -298,15 +307,23 @@ todo-cli edit 1
 # At the "Due date" prompt, type "clear" or "none"
 ```
 
-### Automatic Sorting
+### Smart Automatic Sorting
 
-When you list your todos, items are automatically sorted by due date:
-1. Items with due dates appear first
-2. Sorted by earliest date first
-3. Overdue items are highlighted in **red** and **bold**
-4. Items without due dates appear after
+When you list your todos, items are automatically sorted by importance to help you focus on what matters most:
 
-This sorting is applied before priority sorting (when using `--pr`), so you can have due date order within priority groups.
+1. **Items with BOTH due date AND priority** - These are your most important tasks
+   - Sorted by priority first (A before B before C, etc.)
+   - Within the same priority, sorted by earliest due date first
+
+2. **Items with due date only** - Sorted by earliest due date first
+
+3. **Items with priority only** - Sorted by priority (A before B before C, etc.)
+
+4. **Items with neither** - Sorted by line number (creation order)
+
+**Overdue items** are highlighted in **red** and **bold** for immediate visibility.
+
+This smart sorting ensures that urgent, important tasks with deadlines always appear at the top of your list, making it easy to focus on what needs your attention first.
 
 ### Examples
 
@@ -518,7 +535,7 @@ cargo test --test integration_tests
 
 The test suite includes:
 - **38 unit tests** - Testing metadata parsing, JSON serialization, age filtering, and date handling
-- **50 integration tests** - Testing all CLI commands end-to-end including edit, due dates, and filtering
+- **52 integration tests** - Testing all CLI commands end-to-end including edit, due dates, filtering, and smart sorting
 
 ## Tips
 
@@ -573,6 +590,12 @@ todo-cli list  # Items with due dates automatically appear first
 **Set deadlines for follow-ups:**
 ```bash
 todo-cli add "Follow up with client Due:+3d @work"  # Due in 3 days
+```
+
+**Create high-priority tasks with deadlines:**
+```bash
+todo-cli add "Complete proposal Due:+2d @work P:ClientA"
+todo-cli pr A 1  # Set priority A - this will appear at the very top
 ```
 
 ## License

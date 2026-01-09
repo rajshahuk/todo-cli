@@ -1277,3 +1277,96 @@ fn test_list_hide_waiting_with_no_results() {
 
     teardown();
 }
+
+#[test]
+fn test_list_smart_sorting_priority() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Add tasks with different combinations of due dates and priorities
+    run_command_with_input(&["add", "Task A - Due+Pri Due:2026-02-15"], "Y\n");
+    run_command(&["pr", "B", "1"]);
+
+    run_command_with_input(&["add", "Task B - Due+Pri Due:2026-02-10"], "Y\n");
+    run_command(&["pr", "A", "2"]);
+
+    run_command_with_input(&["add", "Task C - Due only Due:2026-02-05"], "Y\n");
+
+    run_command_with_input(&["add", "Task D - Pri only"], "Y\n");
+    run_command(&["pr", "C", "4"]);
+
+    run_command_with_input(&["add", "Task E - Neither"], "Y\n");
+
+    // List and check order
+    let output = run_command(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Find positions
+    let task_a_pos = stdout.find("Task A").unwrap();
+    let task_b_pos = stdout.find("Task B").unwrap();
+    let task_c_pos = stdout.find("Task C").unwrap();
+    let task_d_pos = stdout.find("Task D").unwrap();
+    let task_e_pos = stdout.find("Task E").unwrap();
+
+    // Expected order:
+    // 1. Task B (Due+Pri with priority A, earliest due date in that priority)
+    // 2. Task A (Due+Pri with priority B)
+    // 3. Task C (Due only)
+    // 4. Task D (Pri only)
+    // 5. Task E (Neither)
+
+    assert!(
+        task_b_pos < task_a_pos,
+        "Task B (Due+Pri A) should come before Task A (Due+Pri B)"
+    );
+    assert!(
+        task_a_pos < task_c_pos,
+        "Task A (Due+Pri B) should come before Task C (Due only)"
+    );
+    assert!(
+        task_c_pos < task_d_pos,
+        "Task C (Due only) should come before Task D (Pri only)"
+    );
+    assert!(
+        task_d_pos < task_e_pos,
+        "Task D (Pri only) should come before Task E (Neither)"
+    );
+
+    teardown();
+}
+
+#[test]
+fn test_list_smart_sorting_same_priority_different_due_dates() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Add tasks with same priority but different due dates
+    run_command_with_input(&["add", "Task Late Due:2026-03-15"], "Y\n");
+    run_command(&["pr", "A", "1"]);
+
+    run_command_with_input(&["add", "Task Early Due:2026-03-10"], "Y\n");
+    run_command(&["pr", "A", "2"]);
+
+    run_command_with_input(&["add", "Task Middle Due:2026-03-12"], "Y\n");
+    run_command(&["pr", "A", "3"]);
+
+    // List and check order
+    let output = run_command(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let early_pos = stdout.find("Task Early").unwrap();
+    let middle_pos = stdout.find("Task Middle").unwrap();
+    let late_pos = stdout.find("Task Late").unwrap();
+
+    // Within same priority (A), should be sorted by earliest due date first
+    assert!(
+        early_pos < middle_pos,
+        "Task Early should come before Task Middle"
+    );
+    assert!(
+        middle_pos < late_pos,
+        "Task Middle should come before Task Late"
+    );
+
+    teardown();
+}
