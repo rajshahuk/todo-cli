@@ -770,11 +770,13 @@ fn parse_txt_line(line: &str) -> TodoItem {
     let mut remaining = trimmed;
 
     // Check for priority at the start: (A) format
-    if remaining.starts_with('(') && remaining.len() > 3 && remaining.chars().nth(2) == Some(')') {
-        if let Some(pri_char) = remaining.chars().nth(1).filter(|c| c.is_ascii_alphabetic()) {
-            priority = Some(pri_char.to_ascii_uppercase());
-            remaining = remaining[4..].trim_start();
-        }
+    if remaining.starts_with('(')
+        && remaining.len() > 3
+        && remaining.chars().nth(2) == Some(')')
+        && let Some(pri_char) = remaining.chars().nth(1).filter(|c| c.is_ascii_alphabetic())
+    {
+        priority = Some(pri_char.to_ascii_uppercase());
+        remaining = remaining[4..].trim_start();
     }
 
     // Parse the rest of the line word by word
