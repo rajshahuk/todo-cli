@@ -203,7 +203,16 @@ fn check_and_create_file() -> io::Result<()> {
 fn read_todos() -> io::Result<Vec<TodoItem>> {
     let content = fs::read_to_string(TODO_FILE)?;
 
-    let mut todos: Vec<TodoItem> = serde_json::from_str(&content).unwrap_or_else(|_| Vec::new());
+    if content.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut todos: Vec<TodoItem> = serde_json::from_str(&content).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is corrupted and could not be parsed: {}", TODO_FILE, e),
+        )
+    })?;
 
     // Assign line numbers based on array index
     for (i, todo) in todos.iter_mut().enumerate() {
@@ -585,7 +594,13 @@ fn set_priority(priority_str: &str, line_number: usize) -> io::Result<()> {
             return Ok(());
         }
 
-        let pri_char = priority_str.chars().next().unwrap().to_ascii_uppercase();
+        let pri_char = match priority_str.chars().next() {
+            Some(c) => c.to_ascii_uppercase(),
+            None => {
+                eprintln!("Error: Priority must be a single character (A-Z)");
+                return Ok(());
+            }
+        };
         if !pri_char.is_ascii_alphabetic() {
             eprintln!("Error: Priority must be a letter (A-Z)");
             return Ok(());
@@ -676,7 +691,13 @@ fn edit_todo(line_number: usize) -> io::Result<()> {
         if pri.to_lowercase() == "clear" || pri.to_lowercase() == "none" {
             todo_mut.priority = None;
         } else if pri.len() == 1 {
-            let pri_char = pri.chars().next().unwrap().to_ascii_uppercase();
+            let pri_char = match pri.chars().next() {
+                Some(c) => c.to_ascii_uppercase(),
+                None => {
+                    eprintln!("Warning: Invalid priority '{}', keeping current value", pri);
+                    return Ok(());
+                }
+            };
             if pri_char.is_ascii_alphabetic() {
                 todo_mut.priority = Some(pri_char);
             } else {
@@ -750,8 +771,7 @@ fn parse_txt_line(line: &str) -> TodoItem {
 
     // Check for priority at the start: (A) format
     if remaining.starts_with('(') && remaining.len() > 3 && remaining.chars().nth(2) == Some(')') {
-        let pri_char = remaining.chars().nth(1).unwrap();
-        if pri_char.is_ascii_alphabetic() {
+        if let Some(pri_char) = remaining.chars().nth(1).filter(|c| c.is_ascii_alphabetic()) {
             priority = Some(pri_char.to_ascii_uppercase());
             remaining = remaining[4..].trim_start();
         }
