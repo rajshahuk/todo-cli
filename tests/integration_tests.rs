@@ -388,6 +388,40 @@ fn test_mark_done() {
 }
 
 #[test]
+fn test_mark_done_skip_confirm() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Buy milk", None, None)]);
+
+    // No stdin needed with --yes flag
+    let output = run_command(&["done", "--yes", "1"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("marked as done"));
+
+    let updated_content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(updated_content.contains("done_date"));
+
+    teardown();
+}
+
+#[test]
+fn test_mark_done_skip_confirm_short_flag() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Buy milk", None, None)]);
+
+    let output = run_command(&["done", "-y", "1"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("marked as done"));
+
+    teardown();
+}
+
+#[test]
 fn test_mark_done_cancelled() {
     let _lock = TEST_LOCK.lock().unwrap();
     setup();

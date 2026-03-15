@@ -37,7 +37,12 @@ enum Commands {
         hide_waiting: bool,
     },
     /// Mark a todo item as done
-    Done { line_number: usize },
+    Done {
+        line_number: usize,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     /// Edit a todo item
     Edit { line_number: usize },
     /// Set or clear priority for a todo item
@@ -565,7 +570,7 @@ fn list_todos(
     Ok(())
 }
 
-fn mark_done(line_number: usize) -> io::Result<()> {
+fn mark_done(line_number: usize, skip_confirm: bool) -> io::Result<()> {
     check_and_create_file()?;
 
     let mut todos = read_todos()?;
@@ -582,35 +587,37 @@ fn mark_done(line_number: usize) -> io::Result<()> {
         return Ok(());
     }
 
-    // Display confirmation - show formatted todo item
-    println!("Mark this item as done?");
-    print!("  ");
-    if let Some(pri) = todo.priority {
-        print!("({}) ", pri);
-    }
-    print!("{}", todo.description);
-    if let Some(ctx) = &todo.context {
-        print!(" @{}", ctx);
-    }
-    if let Some(proj) = &todo.project {
-        print!(" P:{}", proj);
-    }
-    for tag in &todo.tags {
-        print!(" T:{}", tag);
-    }
-    if let Some(due) = &todo.due_date {
-        print!(" Due:{}", due);
-    }
-    println!(" S:{}", todo.start_date);
-    print!("(Y/N): ");
-    io::stdout().flush()?;
+    if !skip_confirm {
+        // Display confirmation - show formatted todo item
+        println!("Mark this item as done?");
+        print!("  ");
+        if let Some(pri) = todo.priority {
+            print!("({}) ", pri);
+        }
+        print!("{}", todo.description);
+        if let Some(ctx) = &todo.context {
+            print!(" @{}", ctx);
+        }
+        if let Some(proj) = &todo.project {
+            print!(" P:{}", proj);
+        }
+        for tag in &todo.tags {
+            print!(" T:{}", tag);
+        }
+        if let Some(due) = &todo.due_date {
+            print!(" Due:{}", due);
+        }
+        println!(" S:{}", todo.start_date);
+        print!("(Y/N): ");
+        io::stdout().flush()?;
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
 
-    if input.trim().to_uppercase() != "Y" {
-        println!("Cancelled");
-        return Ok(());
+        if input.trim().to_uppercase() != "Y" {
+            println!("Cancelled");
+            return Ok(());
+        }
     }
 
     // Add done date
@@ -1333,7 +1340,7 @@ fn main() {
             age_filter,
             hide_waiting,
         } => list_todos(all, pr, age_filter, hide_waiting),
-        Commands::Done { line_number } => mark_done(line_number),
+        Commands::Done { line_number, yes } => mark_done(line_number, yes),
         Commands::Edit { line_number } => edit_todo(line_number),
         Commands::Pr {
             priority,
