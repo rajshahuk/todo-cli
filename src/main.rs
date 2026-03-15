@@ -947,7 +947,7 @@ fn projects_list() -> io::Result<()> {
     }
 
     let mut sorted_names: Vec<String> = all_names.into_iter().collect();
-    sorted_names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    sorted_names.sort_by_key(|a| a.to_lowercase());
 
     println!("Projects:");
     for name in &sorted_names {
@@ -1100,7 +1100,7 @@ fn projects_review() -> io::Result<()> {
         .filter(|p| p.status == "active")
         .map(|p| p.name.clone())
         .collect();
-    active_names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    active_names.sort_by_key(|a| a.to_lowercase());
 
     let unassigned_count = todos
         .iter()
