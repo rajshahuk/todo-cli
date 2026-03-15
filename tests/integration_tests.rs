@@ -1703,7 +1703,11 @@ fn test_projects_list_shows_archived_status() {
     let _lock = TEST_LOCK.lock().unwrap();
     setup();
 
-    create_test_projects_file(vec![make_project("OldProject", "archived", Some("2026/01/01"))]);
+    create_test_projects_file(vec![make_project(
+        "OldProject",
+        "archived",
+        Some("2026/01/01"),
+    )]);
     create_test_file_with_todos(vec![]);
 
     let output = run_command(&["projects", "list"]);
@@ -1823,10 +1827,8 @@ fn test_projects_review_add_task() {
     create_test_file_with_todos(todos);
 
     // Add a task during review, then next, decline unassigned
-    let output = run_command_with_input(
-        &["projects", "review"],
-        "a\nNew API endpoint @work\nn\nN\n",
-    );
+    let output =
+        run_command_with_input(&["projects", "review"], "a\nNew API endpoint @work\nn\nN\n");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Added: \"New API endpoint\" to P:Backend"));
@@ -1870,10 +1872,7 @@ fn test_projects_review_unassigned_tasks() {
     create_test_file_with_todos(todos);
 
     // Review Backend, then assign orphan task to Frontend
-    let output = run_command_with_input(
-        &["projects", "review"],
-        "n\nY\n2 Frontend\nd\n",
-    );
+    let output = run_command_with_input(&["projects", "review"], "n\nY\n2 Frontend\nd\n");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Unassigned Tasks"));

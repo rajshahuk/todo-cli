@@ -930,10 +930,7 @@ fn projects_list() -> io::Result<()> {
     let registered = read_projects()?;
 
     // Collect all unique project names from tasks
-    let task_projects: HashSet<String> = todos
-        .iter()
-        .filter_map(|t| t.project.clone())
-        .collect();
+    let task_projects: HashSet<String> = todos.iter().filter_map(|t| t.project.clone()).collect();
 
     // Merge: registered projects + task-only projects
     let mut all_names: HashSet<String> = registered.iter().map(|p| p.name.clone()).collect();
@@ -954,10 +951,7 @@ fn projects_list() -> io::Result<()> {
         let open_count = todos
             .iter()
             .filter(|t| {
-                t.project
-                    .as_ref()
-                    .map(|p| p.to_lowercase())
-                    == Some(name.to_lowercase())
+                t.project.as_ref().map(|p| p.to_lowercase()) == Some(name.to_lowercase())
                     && !t.is_done()
             })
             .count();
@@ -1019,10 +1013,7 @@ fn projects_show(name: &str) -> io::Result<()> {
     let open_tasks: Vec<&TodoItem> = todos
         .iter()
         .filter(|t| {
-            t.project
-                .as_ref()
-                .map(|p| p.to_lowercase())
-                == Some(name.to_lowercase())
+            t.project.as_ref().map(|p| p.to_lowercase()) == Some(name.to_lowercase())
                 && !t.is_done()
         })
         .collect();
@@ -1131,9 +1122,7 @@ fn projects_review() -> io::Result<()> {
             let open_tasks: Vec<&TodoItem> = todos
                 .iter()
                 .filter(|t| {
-                    t.project
-                        .as_ref()
-                        .map(|p| p.to_lowercase())
+                    t.project.as_ref().map(|p| p.to_lowercase())
                         == Some(project_name.to_lowercase())
                         && !t.is_done()
                 })
@@ -1313,7 +1302,8 @@ fn projects_review() -> io::Result<()> {
                     }
                     println!(
                         "Assigned \"{}\" to P:{}",
-                        todos[task_num - 1].description, proj_name
+                        todos[task_num - 1].description,
+                        proj_name
                     );
                 }
             }
