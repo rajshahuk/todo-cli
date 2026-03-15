@@ -15,6 +15,7 @@ A fast, colorful command-line todo list manager written in Rust. Keep track of y
 - 🔍 **Flexible listing** - view all tasks or filter by completion status
 - ⏰ **Age-based filtering** - find todos older than a specific duration (e.g., `+1d`, `+2w`, `+1m`)
 - 🚫 **Hide waiting items** - filter out tasks marked as @WF (waiting for)
+- 📂 **Project management** - register, review, archive, and track projects with `projects.json`
 - 📁 **JSON storage** - human-readable, easy to backup or sync
 
 ## Quick Start
@@ -156,6 +157,11 @@ Mark this item as done?
 (Y/N):
 ```
 
+Skip the confirmation prompt:
+```bash
+todo-cli done --yes 1    # or -y for short
+```
+
 ### Editing Tasks
 
 Edit any field of an existing todo item:
@@ -185,22 +191,60 @@ Tips for editing:
 - **Priority**: Single letter A-Z, or `clear` to remove
 - **Due dates**: Use absolute (YYYY-MM-DD) or relative (+3d, +2w, +1m, +1y) formats
 
-### Viewing Projects
+### Managing Projects
 
-List all unique projects across all todos:
+Projects can be managed with dedicated subcommands. Project metadata is stored in a separate `projects.json` file alongside your `todo.json`.
+
+**List all projects** with status, task counts, and last review date:
 ```bash
-todo-cli projects
+todo-cli projects list
 ```
 
 Example output:
 ```
 Projects:
-  P:Backend
-  P:Frontend
-  P:Website
+  P:Backend  active  3 open tasks  reviewed: 2026/03/15
+  P:Frontend  active  1 open task  reviewed: never
+  P:Website  archived  0 open tasks  reviewed: 2026/02/01
 ```
 
-This command shows all projects in alphabetical order, including those from completed items.
+**Add a new project** (even before creating any tasks for it):
+```bash
+todo-cli projects add "NewProject"
+```
+
+**Show all open tasks** for a specific project:
+```bash
+todo-cli projects show Backend
+```
+
+**Archive a project** to hide it from reviews:
+```bash
+todo-cli projects archive OldProject
+```
+
+**Review all active projects** interactively:
+```bash
+todo-cli projects review
+```
+
+The review flow walks through each active project, showing its open tasks and letting you:
+- Press `n` to move to the next project
+- Press `a` to add a new task to the current project
+- Press `q` to quit the review
+
+After reviewing all projects, any tasks without a project assignment are shown so you can assign them:
+```
+── Unassigned Tasks (2 without a project) ──
+  3     Buy groceries          @shopping
+  5     Call dentist
+
+Assign tasks to projects? (Y/N): Y
+Enter "task_number project_name" or [d]one: 3 Personal
+Assigned "Buy groceries" to P:Personal
+```
+
+Projects from your tasks are automatically synced into `projects.json` during review.
 
 ## Commands Reference
 
@@ -217,9 +261,14 @@ This command shows all projects in alphabetical order, including those from comp
 | `list --hide-waiting --pr` | Active items (no @WF) sorted by priority |
 | `edit <number>` | Edit any field including due date interactively |
 | `done <number>` | Mark item as done (with confirmation) |
+| `done --yes <number>` | Mark item as done (skip confirmation) |
 | `pr <priority> <number>` | Set priority A-Z on an item |
 | `pr clear <number>` | Remove priority from an item |
-| `projects` | List all unique projects |
+| `projects list` | List all projects with status, task counts, and review dates |
+| `projects add <name>` | Register a new project |
+| `projects show <name>` | Show all open tasks for a project |
+| `projects archive <name>` | Archive a project (hide from review) |
+| `projects review` | Interactively review all active projects |
 
 ## Organizing Your Todos
 
@@ -453,8 +502,33 @@ Todos are stored in `todo.json` in your current working directory. The file is a
 | `done_date` | string or null | Date completed (yyyy/mm/dd), set when done |
 | `due_date` | string or null | Date due (yyyy/mm/dd), from `Due:` marker |
 
+### Projects File
+
+Project metadata is stored in `projects.json` alongside your `todo.json`:
+
+```json
+[
+  {
+    "name": "Backend",
+    "status": "active",
+    "last_reviewed": "2026/03/15"
+  },
+  {
+    "name": "OldProject",
+    "status": "archived",
+    "last_reviewed": "2026/02/01"
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | The project name |
+| `status` | string | `"active"` or `"archived"` |
+| `last_reviewed` | string or null | Date last reviewed (yyyy/mm/dd) |
+
 The JSON format makes it easy to:
-- Back up your todos (just copy the file)
+- Back up your todos (just copy both files)
 - Sync across devices (use Dropbox, Git, etc.)
 - Write scripts to analyze your tasks
 - Manually edit if needed
@@ -472,7 +546,6 @@ This project uses GitHub Actions for continuous integration. The CI pipeline:
 
 - **Tests** on multiple platforms (Ubuntu, macOS, Windows)
 - **Lints** code with rustfmt and clippy
-- **Measures code coverage** with tarpaulin
 
 The workflow runs automatically on:
 - Push to `main` branch
@@ -497,7 +570,7 @@ cargo build --release
 ### Dependencies
 
 - **clap** (4.5) - Command-line argument parsing
-- **colored** (2.1) - Terminal colors
+- **colored** (3.1) - Terminal colors
 - **chrono** (0.4) - Date handling
 - **serde** (1.0) - Serialization
 - **serde_json** (1.0) - JSON support
@@ -534,8 +607,8 @@ cargo test --test integration_tests
 ```
 
 The test suite includes:
-- **38 unit tests** - Testing metadata parsing, JSON serialization, age filtering, and date handling
-- **52 integration tests** - Testing all CLI commands end-to-end including edit, due dates, filtering, and smart sorting
+- **41 unit tests** - Testing metadata parsing, JSON serialization, age filtering, date handling, and project info
+- **73 integration tests** - Testing all CLI commands end-to-end including edit, due dates, filtering, smart sorting, and project management
 
 ## Tips
 
@@ -568,8 +641,9 @@ todo-cli list +1w    # Check tasks older than a week
 
 **Project focus:**
 ```bash
-todo-cli projects                      # View all projects
-todo-cli list --pr | grep "P:Website"  # See all website tasks
+todo-cli projects list                 # View all projects with status
+todo-cli projects show Website         # See all open tasks for a project
+todo-cli projects review               # Walk through each project interactively
 ```
 
 **Stale task cleanup:**
