@@ -4,6 +4,7 @@ use std::process::Command;
 use std::sync::Mutex;
 
 const TEST_TODO_FILE: &str = "todo.json";
+const TEST_PROJECTS_FILE: &str = "projects.json";
 
 // Global lock to ensure tests run serially
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -21,14 +22,23 @@ struct TodoItem {
     due_date: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProjectInfo {
+    name: String,
+    status: String,
+    last_reviewed: Option<String>,
+}
+
 fn setup() {
-    // Remove test file if it exists
+    // Remove test files if they exist
     let _ = fs::remove_file(TEST_TODO_FILE);
+    let _ = fs::remove_file(TEST_PROJECTS_FILE);
 }
 
 fn teardown() {
-    // Clean up test file
+    // Clean up test files
     let _ = fs::remove_file(TEST_TODO_FILE);
+    let _ = fs::remove_file(TEST_PROJECTS_FILE);
 }
 
 fn get_binary_path() -> std::path::PathBuf {
@@ -90,6 +100,19 @@ fn run_command_with_input(args: &[&str], input: &str) -> std::process::Output {
 fn create_test_file_with_todos(todos: Vec<TodoItem>) {
     let json = serde_json::to_string_pretty(&todos).expect("Failed to serialize todos");
     fs::write(TEST_TODO_FILE, json).expect("Failed to write test file");
+}
+
+fn create_test_projects_file(projects: Vec<ProjectInfo>) {
+    let json = serde_json::to_string_pretty(&projects).expect("Failed to serialize projects");
+    fs::write(TEST_PROJECTS_FILE, json).expect("Failed to write test projects file");
+}
+
+fn make_project(name: &str, status: &str, last_reviewed: Option<&str>) -> ProjectInfo {
+    ProjectInfo {
+        name: name.to_string(),
+        status: status.to_string(),
+        last_reviewed: last_reviewed.map(|s| s.to_string()),
+    }
 }
 
 fn make_todo(description: &str, priority: Option<char>, done_date: Option<&str>) -> TodoItem {
@@ -486,7 +509,7 @@ fn test_projects_empty() {
 
     create_test_file_with_todos(vec![make_todo("Buy milk", None, None)]);
 
-    let output = run_command(&["projects"]);
+    let output = run_command(&["projects", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("No projects found"));
@@ -512,7 +535,7 @@ fn test_projects_single() {
 
     create_test_file_with_todos(vec![todo]);
 
-    let output = run_command(&["projects"]);
+    let output = run_command(&["projects", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Projects:"));
@@ -561,7 +584,7 @@ fn test_projects_multiple_unique() {
 
     create_test_file_with_todos(todos);
 
-    let output = run_command(&["projects"]);
+    let output = run_command(&["projects", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Projects:"));
@@ -619,7 +642,7 @@ fn test_projects_with_duplicates() {
 
     create_test_file_with_todos(todos);
 
-    let output = run_command(&["projects"]);
+    let output = run_command(&["projects", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Projects:"));
@@ -661,7 +684,7 @@ fn test_projects_includes_done_items() {
 
     create_test_file_with_todos(todos);
 
-    let output = run_command(&["projects"]);
+    let output = run_command(&["projects", "list"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Projects:"));
@@ -1367,6 +1390,554 @@ fn test_list_smart_sorting_same_priority_different_due_dates() {
         middle_pos < late_pos,
         "Task Middle should come before Task Late"
     );
+
+    teardown();
+}
+
+// ===== Project management tests =====
+
+#[test]
+fn test_projects_add() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let output = run_command(&["projects", "add", "Backend"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Added project: P:Backend"));
+
+    // Verify projects.json was created
+    let content = fs::read_to_string(TEST_PROJECTS_FILE).unwrap();
+    assert!(content.contains("Backend"));
+    assert!(content.contains("active"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_add_duplicate() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    run_command(&["projects", "add", "Backend"]);
+    let output = run_command(&["projects", "add", "Backend"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("already exists"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_add_case_insensitive_duplicate() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    run_command(&["projects", "add", "Backend"]);
+    let output = run_command(&["projects", "add", "backend"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("already exists"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_show() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: Some('A'),
+            description: "Fix auth".to_string(),
+            context: Some("work".to_string()),
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Update docs".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Build UI".to_string(),
+            context: None,
+            project: Some("Frontend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    let output = run_command(&["projects", "show", "Backend"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("P:Backend"));
+    assert!(stdout.contains("2 open tasks"));
+    assert!(stdout.contains("Fix auth"));
+    assert!(stdout.contains("Update docs"));
+    assert!(!stdout.contains("Build UI"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_show_empty() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![make_todo("Buy milk", None, None)]);
+
+    let output = run_command(&["projects", "show", "Backend"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("No open tasks for project"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_show_excludes_done() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Done task".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: Some("2025/12/01".to_string()),
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Open task".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    let output = run_command(&["projects", "show", "Backend"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("1 open task"));
+    assert!(stdout.contains("Open task"));
+    assert!(!stdout.contains("Done task"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_archive() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // First add a project
+    run_command(&["projects", "add", "OldProject"]);
+
+    let output = run_command(&["projects", "archive", "OldProject"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Archived project: P:OldProject"));
+
+    // Verify it's archived in the file
+    let content = fs::read_to_string(TEST_PROJECTS_FILE).unwrap();
+    assert!(content.contains("\"archived\""));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_archive_not_found() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let output = run_command(&["projects", "archive", "NonExistent"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("not found"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_archive_already_archived() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_projects_file(vec![make_project("Done", "archived", None)]);
+
+    let output = run_command(&["projects", "archive", "Done"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("already archived"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_list_with_registered() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Register a project with no tasks
+    create_test_projects_file(vec![make_project("NewProject", "active", None)]);
+
+    // Create a task with a different project
+    let todos = vec![TodoItem {
+        priority: None,
+        description: "Task 1".to_string(),
+        context: None,
+        project: Some("Backend".to_string()),
+        tags: vec![],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+        due_date: None,
+    }];
+    create_test_file_with_todos(todos);
+
+    let output = run_command(&["projects", "list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should show both the registered project and the task-derived project
+    assert!(stdout.contains("P:Backend"));
+    assert!(stdout.contains("P:NewProject"));
+    assert!(stdout.contains("Projects:"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_list_shows_task_counts() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Task 1".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Task 2".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    let output = run_command(&["projects", "list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("2 open tasks"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_list_shows_archived_status() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_projects_file(vec![make_project("OldProject", "archived", Some("2026/01/01"))]);
+    create_test_file_with_todos(vec![]);
+
+    let output = run_command(&["projects", "list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("P:OldProject"));
+    assert!(stdout.contains("archived"));
+    assert!(stdout.contains("2026/01/01"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_basic() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: Some('A'),
+            description: "Fix auth".to_string(),
+            context: Some("work".to_string()),
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Build UI".to_string(),
+            context: None,
+            project: Some("Frontend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    // Review: press 'n' for each project, 'N' for unassigned
+    let output = run_command_with_input(&["projects", "review"], "n\nn\nN\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Project Review"));
+    assert!(stdout.contains("P:Backend"));
+    assert!(stdout.contains("P:Frontend"));
+    assert!(stdout.contains("Fix auth"));
+    assert!(stdout.contains("Build UI"));
+    assert!(stdout.contains("Review complete!"));
+    assert!(stdout.contains("Reviewed 2 projects"));
+
+    // Verify projects.json was created with last_reviewed dates
+    let projects_content = fs::read_to_string(TEST_PROJECTS_FILE).unwrap();
+    assert!(projects_content.contains("Backend"));
+    assert!(projects_content.contains("Frontend"));
+    assert!(projects_content.contains("last_reviewed"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_quit_early() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Task A".to_string(),
+            context: None,
+            project: Some("Alpha".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Task B".to_string(),
+            context: None,
+            project: Some("Beta".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    // Quit after first project
+    let output = run_command_with_input(&["projects", "review"], "q\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("P:Alpha"));
+    assert!(stdout.contains("Reviewed 1 projects"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_add_task() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![TodoItem {
+        priority: None,
+        description: "Existing task".to_string(),
+        context: None,
+        project: Some("Backend".to_string()),
+        tags: vec![],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+        due_date: None,
+    }];
+    create_test_file_with_todos(todos);
+
+    // Add a task during review, then next, decline unassigned
+    let output = run_command_with_input(
+        &["projects", "review"],
+        "a\nNew API endpoint @work\nn\nN\n",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Added: \"New API endpoint\" to P:Backend"));
+    assert!(stdout.contains("Review complete!"));
+
+    // Verify the task was saved
+    let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    assert!(content.contains("New API endpoint"));
+    assert!(content.contains("Backend"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_unassigned_tasks() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Assigned task".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Orphan task".to_string(),
+            context: None,
+            project: None,
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    // Review Backend, then assign orphan task to Frontend
+    let output = run_command_with_input(
+        &["projects", "review"],
+        "n\nY\n2 Frontend\nd\n",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Unassigned Tasks"));
+    assert!(stdout.contains("Orphan task"));
+    assert!(stdout.contains("Assigned \"Orphan task\" to P:Frontend"));
+
+    // Verify the assignment was saved
+    let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    let saved_todos: Vec<TodoItem> = serde_json::from_str(&content).unwrap();
+    assert_eq!(saved_todos[1].project, Some("Frontend".to_string()));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_no_projects_no_tasks() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![]);
+
+    let output = run_command_with_input(&["projects", "review"], "");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("No active projects to review and no unassigned tasks"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_skips_archived() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Create an archived project and an active one
+    create_test_projects_file(vec![
+        make_project("Archived", "archived", None),
+        make_project("Active", "active", None),
+    ]);
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Old task".to_string(),
+            context: None,
+            project: Some("Archived".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Current task".to_string(),
+            context: None,
+            project: Some("Active".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    let output = run_command_with_input(&["projects", "review"], "n\nN\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should review Active but not Archived
+    assert!(stdout.contains("P:Active"));
+    assert!(stdout.contains("Current task"));
+    assert!(stdout.contains("Reviewed 1 projects"));
+    // Archived project should not appear in review flow
+    assert!(!stdout.contains("── P:Archived"));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_show_case_insensitive() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![TodoItem {
+        priority: None,
+        description: "Task 1".to_string(),
+        context: None,
+        project: Some("Backend".to_string()),
+        tags: vec![],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+        due_date: None,
+    }];
+    create_test_file_with_todos(todos);
+
+    let output = run_command(&["projects", "show", "backend"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Task 1"));
 
     teardown();
 }
