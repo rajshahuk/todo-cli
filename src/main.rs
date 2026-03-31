@@ -76,7 +76,11 @@ enum ProjectCommands {
     /// Archive a project (hide from review)
     Archive { name: String },
     /// Interactively review all active projects
-    Review,
+    Review {
+        /// Skip straight to assigning unassigned tasks to projects
+        #[arg(long)]
+        unassigned: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1062,7 +1066,7 @@ fn projects_archive(name: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn projects_review() -> io::Result<()> {
+fn projects_review(unassigned_only: bool) -> io::Result<()> {
     check_and_create_file()?;
 
     let mut todos = read_todos()?;
@@ -1098,7 +1102,12 @@ fn projects_review() -> io::Result<()> {
         .filter(|t| t.project.is_none() && !t.is_done())
         .count();
 
-    if active_names.is_empty() && unassigned_count == 0 {
+    if unassigned_only {
+        if unassigned_count == 0 {
+            println!("No unassigned tasks");
+            return Ok(());
+        }
+    } else if active_names.is_empty() && unassigned_count == 0 {
         println!("No active projects to review and no unassigned tasks");
         write_projects(&projects)?;
         return Ok(());
@@ -1108,16 +1117,17 @@ fn projects_review() -> io::Result<()> {
     let mut reviewed_count = 0;
     let mut quit = false;
 
-    if !active_names.is_empty() {
+    if !unassigned_only && !active_names.is_empty() {
         println!("=== Project Review ===\n");
     }
 
     for project_name in &active_names {
-        if quit {
+        if quit || unassigned_only {
             break;
         }
 
         // Display project tasks in a scoped block to avoid borrow conflicts
+        let has_open_tasks;
         {
             let open_tasks: Vec<&TodoItem> = todos
                 .iter()
@@ -1127,6 +1137,8 @@ fn projects_review() -> io::Result<()> {
                         && !t.is_done()
                 })
                 .collect();
+
+            has_open_tasks = !open_tasks.is_empty();
 
             let task_label = if open_tasks.len() == 1 {
                 "task"
@@ -1165,7 +1177,11 @@ fn projects_review() -> io::Result<()> {
 
         // Interactive prompt
         loop {
-            print!("\n[n]ext, [a]dd task, [q]uit: ");
+            if has_open_tasks {
+                print!("\n[n]ext, [a]dd task, [q]uit: ");
+            } else {
+                print!("\n[n]ext, [a]dd task, [arch]ive, [q]uit: ");
+            }
             io::stdout().flush()?;
 
             let mut input = String::new();
@@ -1200,13 +1216,25 @@ fn projects_review() -> io::Result<()> {
                         todos.push(new_item);
                     }
                 }
+                "arch" | "archive" if !has_open_tasks => {
+                    if let Some(proj) = projects.iter_mut().find(|p| p.name == *project_name) {
+                        proj.status = "archived".to_string();
+                    }
+                    println!("Archived P:{}", project_name);
+                    println!();
+                    break;
+                }
                 "q" => {
                     quit = true;
                     println!();
                     break;
                 }
                 _ => {
-                    println!("Invalid choice. Use [n]ext, [a]dd, or [q]uit");
+                    if has_open_tasks {
+                        println!("Invalid choice. Use [n]ext, [a]dd, or [q]uit");
+                    } else {
+                        println!("Invalid choice. Use [n]ext, [a]dd, [arch]ive, or [q]uit");
+                    }
                 }
             }
         }
@@ -1223,88 +1251,90 @@ fn projects_review() -> io::Result<()> {
 
         if !unassigned_indices.is_empty() {
             println!(
-                "── Unassigned Tasks ({} without a project) ──",
+                "── Unassigned Tasks ({} without a project) ──\n",
                 unassigned_indices.len()
             );
+
+            let mut unassigned_quit = false;
             for &idx in &unassigned_indices {
+                if unassigned_quit {
+                    break;
+                }
+
                 print!("  ");
                 todos[idx].display();
-            }
 
-            print!("\nAssign tasks to projects? (Y/N): ");
-            io::stdout().flush()?;
-
-            let mut response = String::new();
-            io::stdin().read_line(&mut response)?;
-
-            if response.trim().to_uppercase() == "Y" {
                 loop {
-                    print!("Enter \"task_number project_name\" or [d]one: ");
+                    print!("\n[s]kip, [a]ssign to project, [q]uit: ");
                     io::stdout().flush()?;
 
-                    let mut assignment = String::new();
-                    io::stdin().read_line(&mut assignment)?;
-                    let assignment = assignment.trim();
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    let choice = input.trim().to_lowercase();
 
-                    if assignment.to_lowercase() == "d"
-                        || assignment.to_lowercase() == "done"
-                        || assignment.is_empty()
-                    {
-                        break;
-                    }
-
-                    let parts: Vec<&str> = assignment.splitn(2, ' ').collect();
-                    if parts.len() != 2 {
-                        println!("Invalid format. Use: task_number project_name");
-                        continue;
-                    }
-
-                    let task_num: usize = match parts[0].parse() {
-                        Ok(n) => n,
-                        Err(_) => {
-                            println!("Invalid task number");
-                            continue;
+                    match choice.as_str() {
+                        "s" | "" => {
+                            println!();
+                            break;
                         }
-                    };
+                        "a" => {
+                            // Show numbered list of active projects
+                            let active_projects: Vec<&str> = projects
+                                .iter()
+                                .filter(|p| p.status == "active")
+                                .map(|p| p.name.as_str())
+                                .collect();
+                            for (i, name) in active_projects.iter().enumerate() {
+                                println!("  {}) {}", i + 1, name);
+                            }
 
-                    let proj_name = parts[1].to_string();
+                            print!("Project (number or new name): ");
+                            io::stdout().flush()?;
 
-                    if task_num == 0 || task_num > todos.len() {
-                        println!("Task {} does not exist", task_num);
-                        continue;
+                            let mut proj_input = String::new();
+                            io::stdin().read_line(&mut proj_input)?;
+                            let proj_input = proj_input.trim();
+
+                            if proj_input.is_empty() {
+                                println!();
+                                break;
+                            }
+
+                            // Resolve number to project name, or use as-is
+                            let proj_name = if let Ok(n) = proj_input.parse::<usize>() {
+                                if n == 0 || n > active_projects.len() {
+                                    println!("Invalid number");
+                                    continue;
+                                }
+                                active_projects[n - 1].to_string()
+                            } else {
+                                proj_input.to_string()
+                            };
+
+                            todos[idx].project = Some(proj_name.clone());
+                            if !projects
+                                .iter()
+                                .any(|p| p.name.to_lowercase() == proj_name.to_lowercase())
+                            {
+                                projects.push(ProjectInfo {
+                                    name: proj_name.clone(),
+                                    status: "active".to_string(),
+                                    last_reviewed: None,
+                                });
+                            }
+                            println!("Assigned \"{}\" to P:{}", todos[idx].description, proj_name);
+                            println!();
+                            break;
+                        }
+                        "q" => {
+                            unassigned_quit = true;
+                            println!();
+                            break;
+                        }
+                        _ => {
+                            println!("Invalid choice. Use [s]kip, [a]ssign, or [q]uit");
+                        }
                     }
-
-                    if todos[task_num - 1].is_done() {
-                        println!("Task {} is already done", task_num);
-                        continue;
-                    }
-
-                    if todos[task_num - 1].project.is_some() {
-                        println!(
-                            "Task {} is already assigned to P:{}",
-                            task_num,
-                            todos[task_num - 1].project.as_ref().unwrap()
-                        );
-                        continue;
-                    }
-
-                    todos[task_num - 1].project = Some(proj_name.clone());
-                    // Ensure this project is registered
-                    if !projects
-                        .iter()
-                        .any(|p| p.name.to_lowercase() == proj_name.to_lowercase())
-                    {
-                        projects.push(ProjectInfo {
-                            name: proj_name.clone(),
-                            status: "active".to_string(),
-                            last_reviewed: None,
-                        });
-                    }
-                    println!(
-                        "Assigned \"{}\" to P:{}",
-                        todos[task_num - 1].description,
-                        proj_name
-                    );
                 }
             }
         }
@@ -1341,7 +1371,7 @@ fn main() {
             ProjectCommands::Add { name } => projects_add(&name),
             ProjectCommands::Show { name } => projects_show(&name),
             ProjectCommands::Archive { name } => projects_archive(&name),
-            ProjectCommands::Review => projects_review(),
+            ProjectCommands::Review { unassigned } => projects_review(unassigned),
         },
         Commands::Convert { input, output } => convert_file(&input, output),
     };

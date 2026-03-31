@@ -1871,8 +1871,8 @@ fn test_projects_review_unassigned_tasks() {
     ];
     create_test_file_with_todos(todos);
 
-    // Review Backend, then assign orphan task to Frontend
-    let output = run_command_with_input(&["projects", "review"], "n\nY\n2 Frontend\nd\n");
+    // Review Backend, then assign orphan task to new project "Frontend"
+    let output = run_command_with_input(&["projects", "review"], "n\na\nFrontend\n");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(stdout.contains("Unassigned Tasks"));
@@ -1883,6 +1883,138 @@ fn test_projects_review_unassigned_tasks() {
     let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
     let saved_todos: Vec<TodoItem> = serde_json::from_str(&content).unwrap();
     assert_eq!(saved_todos[1].project, Some("Frontend".to_string()));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_assign_unassigned_by_number() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_projects_file(vec![
+        make_project("Alpha", "active", None),
+        make_project("Beta", "active", None),
+    ]);
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Alpha task".to_string(),
+            context: None,
+            project: Some("Alpha".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Unassigned one".to_string(),
+            context: None,
+            project: None,
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Unassigned two".to_string(),
+            context: None,
+            project: None,
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    // Review Alpha and Beta, then for unassigned tasks:
+    // - assign "Unassigned one" to Beta (number 2), skip "Unassigned two"
+    let output = run_command_with_input(&["projects", "review"], "n\nn\na\n2\ns\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Unassigned Tasks"));
+    assert!(stdout.contains("Assigned \"Unassigned one\" to P:Beta"));
+
+    let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    let saved_todos: Vec<TodoItem> = serde_json::from_str(&content).unwrap();
+    assert_eq!(saved_todos[1].project, Some("Beta".to_string()));
+    assert_eq!(saved_todos[2].project, None);
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_unassigned_flag_skips_projects() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    let todos = vec![
+        TodoItem {
+            priority: None,
+            description: "Assigned task".to_string(),
+            context: None,
+            project: Some("Backend".to_string()),
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+        TodoItem {
+            priority: None,
+            description: "Orphan task".to_string(),
+            context: None,
+            project: None,
+            tags: vec![],
+            start_date: "2025/11/29".to_string(),
+            done_date: None,
+            due_date: None,
+        },
+    ];
+    create_test_file_with_todos(todos);
+
+    // --unassigned should skip the project review loop and go straight to unassigned tasks
+    let output = run_command_with_input(&["projects", "review", "--unassigned"], "a\nBackend\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        !stdout.contains("Project Review"),
+        "should not show project review header"
+    );
+    assert!(stdout.contains("Unassigned Tasks"));
+    assert!(stdout.contains("Orphan task"));
+    assert!(stdout.contains("Assigned \"Orphan task\" to P:Backend"));
+
+    let content = fs::read_to_string(TEST_TODO_FILE).unwrap();
+    let saved_todos: Vec<TodoItem> = serde_json::from_str(&content).unwrap();
+    assert_eq!(saved_todos[1].project, Some("Backend".to_string()));
+
+    teardown();
+}
+
+#[test]
+fn test_projects_review_unassigned_flag_no_unassigned() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    create_test_file_with_todos(vec![TodoItem {
+        priority: None,
+        description: "Assigned task".to_string(),
+        context: None,
+        project: Some("Backend".to_string()),
+        tags: vec![],
+        start_date: "2025/11/29".to_string(),
+        done_date: None,
+        due_date: None,
+    }]);
+
+    let output = run_command_with_input(&["projects", "review", "--unassigned"], "");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("No unassigned tasks"));
 
     teardown();
 }
