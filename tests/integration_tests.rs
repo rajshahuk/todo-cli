@@ -1602,6 +1602,27 @@ fn test_projects_archive() {
 }
 
 #[test]
+fn test_projects_archive_unregistered_project_from_todos() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    setup();
+
+    // Task-only project: todo.json has P:Ghost, projects.json does not exist
+    run_command_with_input(&["add", "ghost task P:Ghost"], "Y\n");
+    assert!(!std::path::Path::new(TEST_PROJECTS_FILE).exists());
+
+    let output = run_command(&["projects", "archive", "Ghost"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Archived project: P:Ghost"));
+
+    let content = fs::read_to_string(TEST_PROJECTS_FILE).unwrap();
+    assert!(content.contains("\"Ghost\""));
+    assert!(content.contains("\"archived\""));
+
+    teardown();
+}
+
+#[test]
 fn test_projects_archive_not_found() {
     let _lock = TEST_LOCK.lock().unwrap();
     setup();

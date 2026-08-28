@@ -1059,6 +1059,30 @@ fn projects_archive(name: &str) -> io::Result<()> {
         project.status = "archived".to_string();
         write_projects(&projects)?;
         println!("Archived project: P:{}", name);
+        return Ok(());
+    }
+
+    // Not registered yet: fall back to project names used by tasks in todo.json
+    let todos = if Path::new(TODO_FILE).exists() {
+        read_todos()?
+    } else {
+        Vec::new()
+    };
+    let task_name = todos.iter().find_map(|t| {
+        t.project
+            .as_ref()
+            .filter(|p| p.to_lowercase() == name.to_lowercase())
+            .cloned()
+    });
+
+    if let Some(task_name) = task_name {
+        projects.push(ProjectInfo {
+            name: task_name.clone(),
+            status: "archived".to_string(),
+            last_reviewed: None,
+        });
+        write_projects(&projects)?;
+        println!("Archived project: P:{}", task_name);
     } else {
         eprintln!("Error: Project '{}' not found", name);
     }
